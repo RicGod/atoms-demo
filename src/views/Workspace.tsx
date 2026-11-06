@@ -268,7 +268,8 @@ export function Workspace(props: {
                 </button>
               </>
             ) : (
-              {/* 步骤：访客工作区轻提示；登录后可保存项目与持续对话 */}
+              // 步骤：访客工作区轻提示；登录后可保存项目与持续对话
+              // 注意：三元 else 分支只能有一个表达式；勿用 {/* */} 与元素并列（会解析失败）
               <span className="hint">当前为访客模式 · 登录后解锁更多功能</span>
             )}
             {modeBadgeLabel(props.mode) ? (
