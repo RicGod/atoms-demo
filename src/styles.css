@@ -302,11 +302,11 @@ select:focus-visible,
   color: var(--muted);
 }
 
-/* —— 访客首页 —— */
+/* —— 访客首页（对齐参考站：浅色极简大输入 + 短副文案 + 无演示区标题） —— */
 .guest-hero {
-  max-width: 640px;
+  max-width: 42rem;
   margin: 0 auto;
-  padding: 8vh var(--space-5) var(--space-6);
+  padding: 5.5rem var(--space-5) var(--space-6);
   text-align: center;
 }
 
@@ -314,7 +314,7 @@ select:focus-visible,
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
-  margin: 0 0 0.85rem;
+  margin: 0 0 1rem;
   padding: 0.28rem 0.7rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-pill);
@@ -337,9 +337,9 @@ select:focus-visible,
 .hero-title {
   margin: 0;
   font-family: var(--font-display);
-  font-size: clamp(2.6rem, 6vw, 3.6rem);
+  font-size: clamp(2.35rem, 5.5vw, 2.75rem);
   letter-spacing: -0.04em;
-  font-weight: 700;
+  font-weight: 800;
   background: linear-gradient(120deg, #0f172a 20%, #0e7490 85%);
   -webkit-background-clip: text;
   background-clip: text;
@@ -347,40 +347,78 @@ select:focus-visible,
 }
 
 .hero-sub {
-  margin: 0.75rem auto 1.75rem;
+  margin: 1.15rem auto 2.25rem;
   color: var(--muted);
   max-width: 36rem;
-  line-height: 1.55;
+  font-size: 0.95rem;
+  line-height: 1.6;
 }
 
+/* 步骤：大输入容器 = 唯一边框面；内部 textarea 无嵌套框 */
 .guest-compose {
   text-align: left;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.9)),
-    var(--surface);
+  background: rgba(255, 255, 255, 0.92);
   border: 1px solid var(--border);
   border-radius: 16px;
   padding: var(--space-4);
-  box-shadow: var(--shadow), 0 0 0 1px rgba(255, 255, 255, 0.7) inset;
+  box-shadow: var(--shadow);
 }
 
 .guest-compose textarea {
   width: 100%;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 0.85rem 1rem;
-  resize: vertical;
-  min-height: 96px;
-  background: #fafafa;
+  border: 0;
+  border-radius: 0;
+  padding: 0.15rem 0.1rem;
+  resize: none;
+  min-height: 5.5rem;
+  background: transparent;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.guest-compose textarea:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.guest-compose textarea:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.guest-compose:focus-within {
+  border-color: var(--accent);
+  box-shadow: var(--focus);
 }
 
 .guest-actions {
   margin-top: 0.75rem;
+  justify-content: flex-end;
 }
 
-.preset-block {
-  margin-top: 1.75rem;
-  text-align: left;
+/* 步骤：低调示例 chips，无大标题；参考站 mono + 小圆角 */
+.preset-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.chip-quiet {
+  border-radius: 10px;
+  padding: 0.35rem 0.75rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  background: rgba(255, 255, 255, 0.65);
+  color: var(--muted);
+}
+
+.chip-quiet:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--border-strong);
+  background: var(--surface);
 }
 
 /* —— 登录 —— */
