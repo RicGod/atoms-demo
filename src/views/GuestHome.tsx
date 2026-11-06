@@ -25,6 +25,10 @@ export function GuestHome(props: {
       </header>
 
       <main className="guest-hero">
+        <p className="tech-eyebrow">
+          <span className="tech-dot" aria-hidden="true" />
+          Instant HTML · Live Preview
+        </p>
         <h1 className="hero-title">Atoms</h1>
         <p className="hero-sub">
           一句话生成可交互单文件 HTML，即时预览。登录后可保存为项目并对话迭代。
@@ -50,7 +54,7 @@ export function GuestHome(props: {
             >
               {props.streaming ? '生成中…' : '生成预览'}
             </button>
-            <span className="hint">访客可预览，不落库 · 赛马需登录</span>
+            <span className="hint">访客可预览，登录后可保存 · 赛马需登录</span>
           </div>
           <p className={`status-line ${props.statusError ? 'error' : ''}`}>
             {props.statusText}
@@ -58,13 +62,14 @@ export function GuestHome(props: {
         </div>
 
         <div className="preset-block">
-          <p className="section-label">预置示例（失败兜底）</p>
+          <p className="section-label">试试这些演示应用</p>
           <div className="chips">
             {PRESETS.map((p) => (
               <button
                 key={p.id}
                 type="button"
                 className="chip"
+                disabled={props.streaming}
                 onClick={() => props.onLoadPreset(p.path)}
               >
                 {p.label}

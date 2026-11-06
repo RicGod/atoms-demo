@@ -7,6 +7,7 @@ import {
   type TaskSource,
 } from '../shared/constants.js'
 import {
+  extractHtml,
   streamBuiltinHtml,
   type ChatTurn,
   type StreamResult,
@@ -28,6 +29,7 @@ export type StreamHtmlFn = (options: {
   messages?: ChatTurn[]
   currentHtml?: string
   onChunk?: (text: string) => void
+  onThinking?: (text: string) => void
   signal?: AbortSignal
 }) => Promise<StreamResult>
 
@@ -129,6 +131,18 @@ export function createApp(options: CreateAppOptions = {}) {
       return
     }
 
+    // 步骤：流式过程兼容旧 chunk，并增补 thinking / delta / html
+    let rawAccum = ''
+    let lastHtmlEmit = 0
+    const emitProgressiveHtml = (force = false) => {
+      const now = Date.now()
+      if (!force && now - lastHtmlEmit < 180) return
+      lastHtmlEmit = now
+      if (!rawAccum.trim()) return
+      // 尽力预览：未完成文档也经 extractHtml 包一层可渲染壳
+      send('html', { html: extractHtml(rawAccum) })
+    }
+
     // 经注入的 streamHtml 调用，测试可替换而不触达百炼
     const result = await streamHtml({
       prompt,
@@ -136,11 +150,21 @@ export function createApp(options: CreateAppOptions = {}) {
       apiKey,
       messages,
       currentHtml,
-      onChunk: (text) => send('chunk', { text }),
+      onThinking: (text) => send('thinking', { text }),
+      onChunk: (text) => {
+        // 兼容：旧前端只认 chunk
+        send('chunk', { text })
+        // 新协议：正文 delta + 周期性 html 快照
+        send('delta', { text })
+        rawAccum += text
+        emitProgressiveHtml(false)
+      },
       signal: req.aborted ? AbortSignal.abort() : undefined,
     })
 
     if (result.ok) {
+      // 结束前再推一帧完整 html，便于前端右侧代码区对齐终稿
+      send('html', { html: result.html })
       send('result', { html: result.html, mode })
       send('done', { ok: true, mode })
     } else {

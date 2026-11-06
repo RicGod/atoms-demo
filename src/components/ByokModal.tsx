@@ -19,7 +19,7 @@ export function ByokModal(props: {
       <div className="modal">
         <h3>自配模型</h3>
         <p className="hint warn">
-          出于安全考虑不做服务端持久化：API Key 仅保存在本机浏览器 localStorage。
+          出于安全考虑，API Key 只保存在本机浏览器，不会上传到服务器。
         </p>
         <div className="field">
           <label htmlFor="byok-base">Base URL</label>

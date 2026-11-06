@@ -23,7 +23,7 @@ export function LoginView(props: {
 
       <main className="login-card">
         <h1>登录</h1>
-        <p className="hero-sub">输入邮箱即可进入项目列表。MVP 无验证码。</p>
+        <p className="hero-sub">输入邮箱即可进入项目列表。当前无需验证码。</p>
         <div className="field">
           <label htmlFor="login-email">邮箱</label>
           <input

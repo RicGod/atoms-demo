@@ -15,7 +15,7 @@ export function ProjectList(props: {
   statusText: string
   statusError: boolean
 }) {
-  // 收藏筛选为 UI 占位：MVP 无收藏字段，列表仍展示全部并提示
+  // 收藏筛选为 UI 占位：暂无收藏字段，列表仍展示全部并提示
   const visible = props.tasks
 
   return (
@@ -91,7 +91,7 @@ export function ProjectList(props: {
         </div>
 
         {props.filter === 'fav' ? (
-          <p className="hint">MVP 暂无收藏字段，以下仍展示全部项目。</p>
+          <p className="hint">收藏功能即将上线，当前仍展示全部项目。</p>
         ) : null}
 
         <p className={`status-line ${props.statusError ? 'error' : ''}`}>

@@ -1,3 +1,4 @@
+import { HTML_GENERATOR_SYSTEM_PROMPT } from '../../shared/ui-ux-skill'
 import { extractHtmlClient } from './html'
 import type { ChatTurn } from './api'
 import type { ByokConfig } from './types'
@@ -77,8 +78,8 @@ export async function streamByokHtml(options: {
       messages: [
         {
           role: 'system',
-          content:
-            '你是单文件 HTML 生成器。只输出完整可交互 HTML，不要 Markdown 围栏与解释。样式脚本自包含。若提供当前 HTML，请整页覆盖改写。',
+          // 步骤：与服务端内置生成共用 ui-ux-pro-max 约束
+          content: HTML_GENERATOR_SYSTEM_PROMPT,
         },
         { role: 'user', content: userContent },
       ],

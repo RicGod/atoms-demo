@@ -2,7 +2,11 @@ import request from 'supertest'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createApp, type StreamHtmlFn } from './app.js'
 import { ALIQWEN_API_ENV, BAILIAN_API_ENV } from './lib/bailian-env.js'
-import { buildUserContent, type StreamResult } from './lib/bailian.js'
+import {
+  buildUserContent,
+  SYSTEM_PROMPT,
+  type StreamResult,
+} from './lib/bailian.js'
 
 /**
  * 解析 SSE 文本为事件列表（event + data JSON）
@@ -38,6 +42,15 @@ describe('buildUserContent', () => {
     expect(text).toContain('当前 HTML')
     expect(text).toContain('加个计分板')
     expect(text).toContain('snake')
+  })
+})
+
+describe('SYSTEM_PROMPT · ui-ux-pro-max', () => {
+  it('内嵌浅色科技感规范且禁止 emoji 图标', () => {
+    expect(SYSTEM_PROMPT).toContain('ui-ux-pro-max')
+    expect(SYSTEM_PROMPT).toMatch(/浅色/)
+    expect(SYSTEM_PROMPT).toMatch(/禁止.*emoji|emoji 当图标/)
+    expect(SYSTEM_PROMPT).toMatch(/Space Grotesk|JetBrains Mono|青蓝/)
   })
 })
 
@@ -80,10 +93,11 @@ describe('POST /api/generate', () => {
     expect(called).toBe(false)
   })
 
-  it('注入 mock LLM 时流式 chunk 并以 builtin mode 结束', async () => {
+  it('注入 mock LLM 时流式 chunk/delta/html 并以 builtin mode 结束', async () => {
     process.env[BAILIAN_API_ENV] = 'test-fake-key-not-real'
 
-    const streamHtml: StreamHtmlFn = async ({ onChunk }) => {
+    const streamHtml: StreamHtmlFn = async ({ onChunk, onThinking }) => {
+      onThinking?.('先搭骨架')
       onChunk?.('<!DOCTYPE html>')
       onChunk?.('<html><body>ok</body></html>')
       return {
@@ -103,6 +117,9 @@ describe('POST /api/generate', () => {
 
     const chunks = events.filter((e) => e.event === 'chunk')
     expect(chunks.length).toBeGreaterThanOrEqual(2)
+    expect(events.some((e) => e.event === 'delta')).toBe(true)
+    expect(events.some((e) => e.event === 'thinking')).toBe(true)
+    expect(events.some((e) => e.event === 'html')).toBe(true)
 
     const result = events.find((e) => e.event === 'result')
     expect(result?.data).toMatchObject({

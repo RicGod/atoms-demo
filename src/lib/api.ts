@@ -26,7 +26,12 @@ export async function generateBuiltin(options: {
   messages?: ChatTurn[]
   /** 当前 HTML，整页覆盖生成 */
   currentHtml?: string
+  /** 兼容：正文 chunk / delta */
   onChunk?: (text: string) => void
+  /** 思考过程增量 */
+  onThinking?: (text: string) => void
+  /** 流式 HTML 快照（右侧代码/尽力预览） */
+  onHtml?: (html: string) => void
   signal?: AbortSignal
 }): Promise<
   | { ok: true; html: string; mode: GenerationMode }
@@ -62,6 +67,8 @@ export async function generateBuiltin(options: {
   let error:
     | { kind?: string; message: string; suggestByok?: boolean }
     | undefined
+  // 兼容旧 mock：仅有 chunk 时本地累加，供 onHtml 尽力预览
+  let chunkAccum = ''
 
   const handleEvent = (event: string, dataRaw: string) => {
     let data: unknown
@@ -70,13 +77,31 @@ export async function generateBuiltin(options: {
     } catch {
       return
     }
-    if (event === 'chunk') {
+    if (event === 'thinking') {
       const text = (data as { text?: string }).text ?? ''
-      options.onChunk?.(text)
+      if (text) options.onThinking?.(text)
+    } else if (event === 'chunk' || event === 'delta') {
+      const text = (data as { text?: string }).text ?? ''
+      if (text) {
+        // delta 与 chunk 内容相同；只对 chunk 回调 onChunk，避免双倍累加
+        if (event === 'chunk') {
+          options.onChunk?.(text)
+          chunkAccum += text
+          // 无 html 事件时（旧 mock）仍推预览快照
+          options.onHtml?.(chunkAccum)
+        }
+      }
+    } else if (event === 'html') {
+      const h = (data as { html?: string }).html ?? ''
+      if (h) {
+        html = h
+        options.onHtml?.(h)
+      }
     } else if (event === 'result') {
       const d = data as { html?: string; mode?: GenerationMode }
       html = d.html ?? ''
       mode = d.mode ?? 'builtin'
+      if (html) options.onHtml?.(html)
     } else if (event === 'error') {
       const d = data as {
         kind?: string

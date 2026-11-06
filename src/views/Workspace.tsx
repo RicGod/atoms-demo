@@ -1,6 +1,7 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { BUILTIN_MODELS } from '../../shared/constants'
 import type { ChatTurn, RaceCandidate } from '../lib/api'
+import { modeBadgeLabel } from '../lib/labels'
 import type { GenerationMode } from '../lib/types'
 
 export type ChatItem =
@@ -18,6 +19,10 @@ export function Workspace(props: {
   draft: string
   onDraftChange: (v: string) => void
   streaming: boolean
+  /** 流式思考过程文案（可折叠展示） */
+  streamThinking: string
+  /** 流式阶段提示（无思考链时的亲和文案） */
+  streamStage: string
   saving: boolean
   html: string
   mode: GenerationMode | null
@@ -41,16 +46,35 @@ export function Workspace(props: {
   suggestions?: string[]
 }) {
   const listRef = useRef<HTMLDivElement>(null)
+  const codeRef = useRef<HTMLPreElement>(null)
+  // 步骤：思考区默认展开，用户可手动折叠
+  const [thinkOpen, setThinkOpen] = useState(true)
 
-  // 步骤：新消息时滚到底部
+  // 步骤：新消息 / 流式时滚到底部
   useEffect(() => {
     const el = listRef.current
     if (el) el.scrollTop = el.scrollHeight
-  }, [props.chat, props.streaming, props.raceCandidates])
+  }, [props.chat, props.streaming, props.streamThinking, props.raceCandidates])
+
+  // 步骤：代码区流式追加时自动滚到底
+  useEffect(() => {
+    if (!props.streaming) return
+    const el = codeRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [props.html, props.streaming])
+
+  // 新一轮流式开始时重新展开思考区
+  useEffect(() => {
+    if (props.streaming) setThinkOpen(true)
+  }, [props.streaming])
 
   const suggestions =
     props.suggestions ??
     ['添加移动控制', '添加在线排行榜', '优化视觉风格']
+
+  const hasThinkBody = Boolean(
+    props.streamThinking.trim() || props.streamStage.trim(),
+  )
 
   return (
     <div className="shell workspace-shell">
@@ -92,8 +116,33 @@ export function Workspace(props: {
               </div>
             )
           })}
+
+          {/* 流式：折叠思考区 + 阶段文案（替代生硬「生成中…」） */}
           {props.streaming ? (
-            <div className="bubble assistant muted">生成中…</div>
+            <div className="stream-panel" aria-live="polite">
+              <button
+                type="button"
+                className="stream-toggle"
+                aria-expanded={thinkOpen}
+                onClick={() => setThinkOpen((v) => !v)}
+              >
+                <span className="stream-pulse" aria-hidden="true" />
+                {thinkOpen ? '收起思考过程' : '展开思考过程'}
+              </button>
+              {thinkOpen && hasThinkBody ? (
+                <div className="stream-body">
+                  {props.streamStage ? (
+                    <p className="stream-stage">{props.streamStage}</p>
+                  ) : null}
+                  {props.streamThinking ? (
+                    <pre className="stream-thinking">{props.streamThinking}</pre>
+                  ) : null}
+                </div>
+              ) : null}
+              {!hasThinkBody ? (
+                <p className="hint stream-wait">正在连接模型，稍等一下…</p>
+              ) : null}
+            </div>
           ) : null}
 
           {props.raceCandidates ? (
@@ -219,10 +268,12 @@ export function Workspace(props: {
                 </button>
               </>
             ) : (
-              <span className="hint">访客模式：不落库 · 赛马已禁用</span>
+              <span className="hint">访客体验 · 不会保存 · 赛马需登录</span>
             )}
-            {props.mode ? (
-              <span className={`badge ${props.mode}`}>{props.mode}</span>
+            {modeBadgeLabel(props.mode) ? (
+              <span className={`badge ${props.mode ?? ''}`}>
+                {modeBadgeLabel(props.mode)}
+              </span>
             ) : null}
           </div>
           <p className={`status-line ${props.statusError ? 'error' : ''}`}>
@@ -242,6 +293,11 @@ export function Workspace(props: {
               onClick={() => props.onPane('preview')}
             >
               预览
+              {props.streaming ? (
+                <span className="pill-live" title="流式尽力预览">
+                  ·直播
+                </span>
+              ) : null}
             </button>
             <button
               type="button"
@@ -251,6 +307,11 @@ export function Workspace(props: {
               onClick={() => props.onPane('code')}
             >
               代码
+              {props.streaming ? (
+                <span className="pill-live" title="源码实时追加">
+                  ·写入中
+                </span>
+              ) : null}
             </button>
           </div>
           <span className="hint file-hint">index.html · 单文件</span>
@@ -258,6 +319,7 @@ export function Workspace(props: {
 
         {props.pane === 'preview' ? (
           <div className="iframe-wrap stage-body">
+            {/* sandbox 保持收紧：仅脚本与表单，无 top-navigation */}
             <iframe
               title="preview"
               sandbox="allow-scripts allow-forms"
@@ -265,7 +327,7 @@ export function Workspace(props: {
             />
           </div>
         ) : (
-          <pre className="code-view stage-body" tabIndex={0}>
+          <pre className="code-view stage-body" tabIndex={0} ref={codeRef}>
             <code>{props.html || '<!-- 尚未生成 index.html -->'}</code>
           </pre>
         )}
@@ -274,7 +336,7 @@ export function Workspace(props: {
   )
 }
 
-const emptyPreview = `<!DOCTYPE html><html><body style="font-family:system-ui,sans-serif;display:grid;place-items:center;height:100vh;margin:0;color:#6b7280;background:#fafafa"><p>在左侧对话区发送 Prompt 开始生成</p></body></html>`
+const emptyPreview = `<!DOCTYPE html><html><body style="font-family:system-ui,sans-serif;display:grid;place-items:center;height:100vh;margin:0;color:#6b7280;background:#fafafa"><p>在左侧描述想法，开始生成页面</p></body></html>`
 
 /** 将对话轮次压成 API 需要的 messages（不含装饰 version） */
 export function chatToMessages(chat: ChatItem[]): ChatTurn[] {

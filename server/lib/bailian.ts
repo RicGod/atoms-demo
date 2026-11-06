@@ -5,6 +5,7 @@ import {
   IDLE_TIMEOUT_MS,
   type BuiltinModel,
 } from '../../shared/constants.js'
+import { HTML_GENERATOR_SYSTEM_PROMPT } from '../../shared/ui-ux-skill.js'
 import { isQuotaOrAuthFailure } from './quota.js'
 
 export type StreamResult =
@@ -22,13 +23,8 @@ export type ChatTurn = {
   content: string
 }
 
-const SYSTEM_PROMPT = `你是一个单文件 HTML 生成器。根据用户需求，输出一份可独立运行的完整 HTML 文档。
-要求：
-1. 只输出 HTML（可含内联 CSS/JS），不要 Markdown 代码围栏，不要解释。
-2. 样式与脚本必须自包含，无需外部资源（可用 CDN 字体也可，但优先内联）。
-3. 页面必须可交互（按钮、输入、动画等至少一种真实交互）。
-4. 视觉有明确风格，避免空白模板感。
-5. 若提供了「当前 HTML」与历史对话，请在现有页面基础上按最新用户意图整页覆盖改写，输出完整新文档（不是补丁片段）。`
+/** 导出供单测断言：system prompt 已内嵌 ui-ux skill */
+export const SYSTEM_PROMPT = HTML_GENERATOR_SYSTEM_PROMPT
 
 /**
  * 组装发给模型的 user 内容：可选历史摘要 + 当前 HTML + 本轮 Prompt
@@ -91,11 +87,22 @@ export async function streamBuiltinHtml(options: {
   messages?: ChatTurn[]
   /** 可选：当前 Artifact HTML，用于整页覆盖迭代 */
   currentHtml?: string
+  /** 兼容：HTML 正文 delta（不含思考链） */
   onChunk?: (text: string) => void
+  /** 模型思考/推理过程（若有） */
+  onThinking?: (text: string) => void
   signal?: AbortSignal
 }): Promise<StreamResult> {
-  const { prompt, model, apiKey, messages, currentHtml, onChunk, signal } =
-    options
+  const {
+    prompt,
+    model,
+    apiKey,
+    messages,
+    currentHtml,
+    onChunk,
+    onThinking,
+    signal,
+  } = options
   // 调用方应已用 getBailianApiKey()；此处再防一手空 Key
   if (!apiKey.trim()) {
     return {
@@ -200,14 +207,16 @@ export async function streamBuiltinHtml(options: {
               delta?: { content?: string; reasoning_content?: string }
             }>
           }
-          // 思考类内容也算「有 chunk」，避免误触空闲超时
-          const delta =
-            json.choices?.[0]?.delta?.content ??
-            json.choices?.[0]?.delta?.reasoning_content ??
-            ''
-          if (delta) {
-            full += delta
-            onChunk?.(delta)
+          const delta = json.choices?.[0]?.delta
+          // 步骤：思考链与正文分离；思考也算活跃，避免误触空闲超时
+          const thinking = delta?.reasoning_content ?? ''
+          const content = delta?.content ?? ''
+          if (thinking) {
+            onThinking?.(thinking)
+          }
+          if (content) {
+            full += content
+            onChunk?.(content)
           }
         } catch {
           // 忽略无法解析的 SSE 行

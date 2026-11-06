@@ -11,6 +11,8 @@ import {
   type RaceCandidate,
 } from './lib/api'
 import { clearByok, loadByok, saveByok, streamByokHtml } from './lib/byok'
+import { doneStatusLabel } from './lib/labels'
+import { revealHtmlGradually } from './lib/stream-example'
 import {
   EMAIL_STORAGE_KEY,
   PRESETS,
@@ -66,6 +68,38 @@ export default function App() {
     null,
   )
   const [lastSource, setLastSource] = useState<'single' | 'horse-race'>('single')
+  // 流式：思考链与阶段性亲和文案
+  const [streamThinking, setStreamThinking] = useState('')
+  const [streamStage, setStreamStage] = useState('')
+
+  /** 无思考链时轮换阶段文案，避免只显示「生成中」 */
+  const beginStreamUi = () => {
+    setStreamThinking('')
+    setStreamStage('正在理解你的需求…')
+    setPane('code')
+  }
+
+  const bumpStageFromHtml = (partial: string) => {
+    if (partial.includes('</style>') || /<style[\s>]/i.test(partial)) {
+      setStreamStage('正在排布样式与结构…')
+    } else if (/<body[\s>]/i.test(partial)) {
+      setStreamStage('正在填充页面内容…')
+    } else if (/<!DOCTYPE|<html/i.test(partial)) {
+      setStreamStage('正在搭建 HTML 骨架…')
+    } else if (partial.length > 40) {
+      setStreamStage('正在写入源码…')
+    }
+  }
+
+  const friendlyDone = (source: 'single' | 'horse-race', guest: boolean) => {
+    if (source === 'horse-race') {
+      return '已选好这一版，右侧可以预览和看代码。想继续打磨的话直接跟我说就行。'
+    }
+    if (guest) {
+      return '这一版已经好了。可以先在右侧预览；登录后就能保存成项目继续改。有什么想优化的尽管说～'
+    }
+    return '这一版已经好了，右侧可预览 / 查看代码。有什么需要优化的继续跟我说就行。'
+  }
 
   const signedIn = Boolean(email.trim())
 
@@ -123,7 +157,7 @@ export default function App() {
     setView('projects')
     setStatus({
       kind: 'info',
-      text: '已登记邮箱。MVP 无验证码，存在冒充风险。',
+      text: '已登记邮箱。当前无需验证码，请妥善保管邮箱入口。',
     })
   }
 
@@ -136,37 +170,94 @@ export default function App() {
     setChat([])
     setHtml('')
     setView('home')
-    setStatus({ kind: 'info', text: '已退出（访客模式）' })
+    setStatus({ kind: 'info', text: '已退出，可继续以访客体验' })
   }
 
-  const loadPreset = async (path: string) => {
-    const res = await fetch(path)
-    const text = await res.text()
-    setHtml(text)
-    setMode('mock')
+  /**
+   * 打开演示应用：带思考过程 + 源码逐步写出（禁止整页蹦出）
+   * @param softFallback 为 true 时表示云端暂不可用后的温和切换，不暴露技术原因
+   */
+  const playExample = async (
+    pick: (typeof PRESETS)[number],
+    softFallback = false,
+  ) => {
     setGuestSession(true)
     setActiveTaskId(null)
-    setChat([
-      {
-        kind: 'assistant',
-        id: nid('a'),
-        text: `已加载预置示例（mock）：${path}`,
-      },
-    ])
-    setVersionN(1)
+    setRaceCandidates(null)
+    setLastSource('single')
+    setMode(null)
+    setVersionN(0)
+    setDraft('')
+    setHtml('')
     setView('workspace')
-    setPane('preview')
-    setStatus({ kind: 'info', text: '已加载预置示例（mock）' })
-  }
+    setStreaming(true)
+    beginStreamUi()
 
-  /** 访客失败/超时兜底：随机预置 */
-  const fallbackMock = async (reason: string) => {
-    const pick = PRESETS[Math.floor(Math.random() * PRESETS.length)]
-    await loadPreset(pick.path)
+    const userText = softFallback
+      ? '先体验一份可交互演示'
+      : `打开演示：${pick.label}`
+    const userMsg: ChatItem = { kind: 'user', id: nid('u'), text: userText }
+    setChat([userMsg])
     setStatus({
       kind: 'info',
-      text: `${reason}；已切换预置「${pick.label}」（mock）`,
+      text: softFallback
+        ? '云端稍忙，先为你打开一份演示应用…'
+        : `正在打开演示「${pick.label}」…`,
     })
+
+    try {
+      const res = await fetch(pick.path)
+      if (!res.ok) throw new Error('演示加载失败')
+      const fullHtml = await res.text()
+      if (!fullHtml.trim()) throw new Error('演示内容为空')
+
+      await revealHtmlGradually({
+        html: fullHtml,
+        label: pick.label,
+        onThinking: (line) => setStreamThinking((prev) => prev + line),
+        onStage: (s) => setStreamStage(s),
+        onHtml: (partial) => {
+          setHtml(partial)
+          bumpStageFromHtml(partial)
+        },
+      })
+
+      applySuccess(userText, fullHtml, 'mock', 'single')
+      if (softFallback) {
+        setStatus({
+          kind: 'info',
+          text: `已切换到演示「${pick.label}」，可继续对话优化`,
+        })
+      }
+    } catch {
+      setStatus({
+        kind: 'error',
+        text: '演示暂时打不开，请稍后重试或换一份试试',
+      })
+      setChat((prev) => [
+        ...prev,
+        {
+          kind: 'assistant',
+          id: nid('a'),
+          text: '抱歉，这份演示没能打开。换一个示例，或稍后再试～',
+        },
+      ])
+    } finally {
+      setStreaming(false)
+      setStreamStage('')
+    }
+  }
+
+  /** 首页点选演示 */
+  const loadPreset = async (path: string) => {
+    const pick = PRESETS.find((p) => p.path === path) ?? PRESETS[0]
+    await playExample(pick, false)
+  }
+
+  /** 云端不可用时温和切换到演示（对用户隐藏技术细节） */
+  const fallbackMock = async (_reason: string) => {
+    const pick = PRESETS[Math.floor(Math.random() * PRESETS.length)]
+    await playExample(pick, true)
   }
 
   const enterWorkspaceFresh = (opts: {
@@ -189,13 +280,13 @@ export default function App() {
         {
           kind: 'assistant',
           id: nid('a'),
-          text: '已打开项目当前产物，可继续对话迭代。',
+          text: '已打开项目当前页面，可继续对话迭代。有想改的直接说就行。',
         },
         {
           kind: 'version',
           id: nid('v'),
           n: 1,
-          label: '当前已保存版本（装饰，不可回看历史）',
+          label: '当前保存版本',
         },
       ])
       setVersionN(1)
@@ -214,7 +305,7 @@ export default function App() {
   const runGenerate = async (userText: string) => {
     const p = userText.trim()
     if (!p) {
-      setStatus({ kind: 'error', text: 'Prompt 不能为空' })
+      setStatus({ kind: 'error', text: '请先描述你的想法' })
       return
     }
     if (signedIn && !guestSession && !activeTaskId) {
@@ -223,8 +314,9 @@ export default function App() {
     }
 
     setStreaming(true)
+    beginStreamUi()
     setRaceCandidates(null)
-    setStatus({ kind: 'info', text: '生成中…' })
+    setStatus({ kind: 'info', text: '正在生成，源码会实时出现在右侧…' })
     const userMsg: ChatItem = { kind: 'user', id: nid('u'), text: p }
     setChat((prev) => [...prev, userMsg])
     setDraft('')
@@ -233,13 +325,21 @@ export default function App() {
     const currentHtml = html || undefined
 
     try {
-      // 步骤：登录用户可优先自配；访客仅内置 / mock
+      // 步骤：登录用户可优先自配；访客走云端，失败则演示体验
       if (signedIn && preferByok && byok) {
+        setHtml('')
         const result = await streamByokHtml({
           prompt: p,
           config: byok,
           currentHtml,
           messages: history,
+          onChunk: (text) => {
+            setHtml((prev) => {
+              const next = prev + text
+              bumpStageFromHtml(next)
+              return next
+            })
+          },
         })
         if (result.ok) {
           applySuccess(p, result.html, 'byok', 'single')
@@ -247,20 +347,34 @@ export default function App() {
         }
         setStatus({
           kind: 'error',
-          text: `自配失败：${result.message}`,
+          text: '自配模型暂时不可用，可检查配置后重试',
         })
         setChat((prev) => [
           ...prev,
-          { kind: 'assistant', id: nid('a'), text: `自配失败：${result.message}` },
+          {
+            kind: 'assistant',
+            id: nid('a'),
+            text: '自配模型这边没跑通。检查一下密钥与地址，或先关掉「自配」用云端生成～',
+          },
         ])
         return
       }
 
+      // 步骤：清空旧 HTML，让流式快照从空开始追加
+      setHtml('')
       const result = await generateBuiltin({
         prompt: p,
         model,
         messages: history,
         currentHtml,
+        onThinking: (t) => {
+          setStreamThinking((prev) => prev + t)
+          setStreamStage('正在思考怎么实现…')
+        },
+        onHtml: (h) => {
+          setHtml(h)
+          bumpStageFromHtml(h)
+        },
       })
 
       if (result.ok) {
@@ -269,11 +383,11 @@ export default function App() {
       }
 
       if (!signedIn || guestSession) {
-        await fallbackMock(result.message || '内置生成失败')
+        await fallbackMock(result.message || 'generate-failed')
       } else {
         setStatus({
           kind: 'error',
-          text: `${result.message || '生成失败'}。可重试 / 换模型 / 配置自配`,
+          text: '生成没成功。可以重试、换模型，或打开自配模型。',
         })
         if (result.suggestByok) setShowByok(true)
         setChat((prev) => [
@@ -281,7 +395,7 @@ export default function App() {
           {
             kind: 'assistant',
             id: nid('a'),
-            text: result.message || '生成失败',
+            text: '这一轮没生成出来。再试一次，或换个模型说说看？',
           },
         ])
       }
@@ -290,10 +404,14 @@ export default function App() {
       if (!signedIn || guestSession) {
         await fallbackMock(msg)
       } else {
-        setStatus({ kind: 'error', text: msg })
+        setStatus({
+          kind: 'error',
+          text: '网络或服务异常，请稍后重试',
+        })
       }
     } finally {
       setStreaming(false)
+      setStreamStage('')
     }
   }
 
@@ -307,6 +425,8 @@ export default function App() {
     setMode(nextMode)
     setLastSource(source)
     setPrompt(userPrompt)
+    setStreamThinking('')
+    setStreamStage('')
     // 步骤：用函数式更新版本号，避免闭包陈旧
     setVersionN((n) => {
       const nextVer = n + 1
@@ -315,19 +435,14 @@ export default function App() {
         {
           kind: 'assistant',
           id: nid('a'),
-          text:
-            source === 'horse-race'
-              ? '已选定赛马 Winner，整页已更新。'
-              : '已根据本轮需求覆盖生成完整 HTML。',
+          text: friendlyDone(source, guestSession || !signedIn),
         },
         {
           kind: 'version',
           id: nid('v'),
           n: nextVer,
           label:
-            source === 'horse-race'
-              ? '赛马择优完成（装饰版本号，不可回看）'
-              : '完成整页覆盖生成（装饰版本号，不可回看）',
+            source === 'horse-race' ? '赛马择优完成' : '本轮生成完成',
         },
       ])
       return nextVer
@@ -335,14 +450,9 @@ export default function App() {
     setStatus({
       kind: 'info',
       text:
-        source === 'horse-race'
-          ? '已选定 Winner'
-          : nextMode === 'builtin'
-            ? '内置模型生成完成'
-            : nextMode === 'byok'
-              ? '自配模型生成完成'
-              : 'mock 完成',
+        source === 'horse-race' ? '已选定这一版' : doneStatusLabel(nextMode),
     })
+    // 完成后切回预览，刷新终稿（保证脚本可交互）
     setPane('preview')
 
     // 步骤：已登录项目内自动覆盖保存，保证回看
@@ -385,7 +495,7 @@ export default function App() {
   const onGuestGenerate = async () => {
     const p = prompt.trim()
     if (!p) {
-      setStatus({ kind: 'error', text: 'Prompt 不能为空' })
+      setStatus({ kind: 'error', text: '请先描述你的想法' })
       return
     }
     // 步骤：进入访客工作区（不落库），再跑单路生成
@@ -404,50 +514,67 @@ export default function App() {
 
   const runGenerateFromHome = async (p: string) => {
     setStreaming(true)
-    setStatus({ kind: 'info', text: '生成中…' })
+    beginStreamUi()
+    setStatus({ kind: 'info', text: '正在生成，源码会实时出现在右侧…' })
     const userMsg: ChatItem = { kind: 'user', id: nid('u'), text: p }
     setChat([userMsg])
+    setHtml('')
     try {
-      const result = await generateBuiltin({ prompt: p, model })
+      const result = await generateBuiltin({
+        prompt: p,
+        model,
+        onThinking: (t) => {
+          setStreamThinking((prev) => prev + t)
+          setStreamStage('模型正在思考…')
+        },
+        onHtml: (h) => {
+          setHtml(h)
+          bumpStageFromHtml(h)
+        },
+      })
       if (result.ok) {
         setHtml(result.html)
         setMode(result.mode)
         setLastSource('single')
         setVersionN(1)
+        setStreamThinking('')
+        setStreamStage('')
         setChat([
           userMsg,
           {
             kind: 'assistant',
             id: nid('a'),
-            text: '已生成可预览 HTML（访客不落库）。',
+            text: friendlyDone('single', true),
           },
           {
             kind: 'version',
             id: nid('v'),
             n: 1,
-            label: '完成搭建（装饰版本号，不可回看）',
+            label: '本轮生成完成',
           },
         ])
-        setStatus({ kind: 'info', text: '内置模型生成完成' })
+        setStatus({ kind: 'info', text: doneStatusLabel(result.mode) })
+        setPane('preview')
         return
       }
-      await fallbackMock(result.message || '内置生成失败')
+      await fallbackMock(result.message || 'generate-failed')
     } catch (e) {
       await fallbackMock(e instanceof Error ? e.message : String(e))
     } finally {
       setStreaming(false)
+      setStreamStage('')
     }
   }
 
   const onRace = async () => {
     // 步骤：访客禁用赛马
     if (!signedIn || guestSession) {
-      setStatus({ kind: 'error', text: '访客不可使用赛马，请先登录' })
+      setStatus({ kind: 'error', text: '登录后才能使用赛马对比' })
       return
     }
     const p = (draft.trim() || prompt).trim()
     if (!p) {
-      setStatus({ kind: 'error', text: '赛马需要 Prompt' })
+      setStatus({ kind: 'error', text: '赛马前请先写下你的想法' })
       return
     }
     if (!activeTaskId) {
@@ -607,6 +734,8 @@ export default function App() {
           draft={draft}
           onDraftChange={setDraft}
           streaming={streaming}
+          streamThinking={streamThinking}
+          streamStage={streamStage}
           saving={saving}
           html={html}
           mode={mode}
@@ -646,7 +775,7 @@ export default function App() {
             setShowByok(false)
             setStatus({
               kind: 'info',
-              text: '自配已保存到本机 localStorage',
+              text: '自配已保存在本机浏览器',
             })
           }}
           onClear={() => {
