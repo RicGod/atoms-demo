@@ -1,0 +1,31 @@
+# 依赖与构建产物
+node_modules/
+dist/
+dist-ssr/
+.npm-cache/
+*.local
+
+# 环境变量：密钥永不进 git（覆盖所有 .env*）
+.env
+.env.*
+!.env.example
+
+# 日志与系统文件
+logs/
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# IDE / 工具
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.vercel/
+*.tsbuildinfo
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/

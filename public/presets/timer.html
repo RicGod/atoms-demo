@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>简易计时器</title>
+  <style>
+    body {
+      margin: 0; min-height: 100vh; display: grid; place-items: center;
+      font-family: "Trebuchet MS", sans-serif;
+      background: linear-gradient(160deg, #082f49, #0ea5e9 55%, #e0f2fe);
+      color: #082f49;
+    }
+    .panel {
+      background: rgba(255,255,255,.9); padding: 2rem; border-radius: 24px;
+      text-align: center; box-shadow: 0 24px 48px rgba(8,47,73,.25); min-width: 280px;
+    }
+    #time { font-size: 3rem; font-variant-numeric: tabular-nums; margin: .6rem 0 1.2rem; }
+    .row { display: flex; gap: .5rem; justify-content: center; flex-wrap: wrap; }
+    button {
+      border: 0; border-radius: 999px; padding: .7rem 1.2rem; cursor: pointer;
+      background: #0369a1; color: #fff; font-size: 1rem;
+    }
+    button.ghost { background: #e0f2fe; color: #0369a1; }
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <h1 style="margin:0;font-size:1.2rem">预置示例 · 计时器</h1>
+    <div id="time">00:00</div>
+    <div class="row">
+      <button id="start">开始</button>
+      <button class="ghost" id="pause">暂停</button>
+      <button class="ghost" id="reset">重置</button>
+    </div>
+  </div>
+  <script>
+    let sec = 0, timer = null;
+    const el = document.getElementById('time');
+    const fmt = (s) => String(Math.floor(s/60)).padStart(2,'0') + ':' + String(s%60).padStart(2,'0');
+    const render = () => { el.textContent = fmt(sec); };
+    document.getElementById('start').onclick = () => {
+      if (timer) return;
+      timer = setInterval(() => { sec += 1; render(); }, 1000);
+    };
+    document.getElementById('pause').onclick = () => {
+      clearInterval(timer); timer = null;
+    };
+    document.getElementById('reset').onclick = () => {
+      clearInterval(timer); timer = null; sec = 0; render();
+    };
+  </script>
+</body>
+</html>

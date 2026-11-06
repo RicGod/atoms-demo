@@ -1,0 +1,118 @@
+# Mini Atoms Demo
+
+一句话 Prompt → 可交互单文件 HTML → iframe Preview →（登记邮箱后）Task 持久化回看。
+
+OpenSpec change：`mini-atoms-demo`。
+
+## 与通过案例的差异
+
+| 点 | 通过案例（参考） | 本 Demo |
+| --- | --- | --- |
+| LLM Key | 浏览器 BYOK 为主 | **服务端内置**百炼 Key（本地 `aliQwen-api` / 兼容 `BAILIAN_API_KEY`）交卷；浏览器自配仅为降级 |
+| 身份 | 视对方实现 | 邮箱登记（无验证码 / 无 OIDC） |
+| 持久化 | 视对方实现 | **Turso**，按邮箱隔离的 Task；覆盖写当前 Artifact |
+| 生成角标 | — | **内置 / 自配 / mock** |
+
+## 明确未做项
+
+- 分享直链（不做公开作品直链产品路径）
+- OIDC / 注册验证码
+- 完整版本树（Task 内覆盖写）
+- Score / 自动裁判（Score 不进模型与持久化）
+- **赛马（Horse Race）**：本轮时间优先主闭环，赛马整段延后；见下文「剩余能力」
+
+## 测试
+
+```bash
+# 单元 / 接口 seam（Vitest，不打真实百炼）
+npm test
+
+# 端到端（Playwright；默认用本机 Chrome channel，无需下载自带 Chromium）
+# 会自动起 npm run dev；用例内 mock /api/generate，不依赖真 Key
+npm run test:e2e
+```
+
+
+## 本地启动
+
+```bash
+# 1. 安装依赖
+npm install
+
+# 2. 配置环境变量（可选；无 Key 时访客可走 mock/预置）
+cp .env.example .env.local
+# 本地百炼 Key：优先用系统/用户环境变量 aliQwen-api（已配置则无需写进 .env.local）
+# 亦可在 .env.local 写 BAILIAN_API_KEY；Turso 可选：TURSO_DATABASE_URL / TURSO_AUTH_TOKEN
+
+# 3. 同时启动前端 + API
+npm run dev
+```
+
+- Web：<http://127.0.0.1:5173>
+- API health：<http://127.0.0.1:3001/api/health>（前端经 Vite 代理亦可访问 `/api/health`）
+- 启动日志对百炼 Key 只打印 `present` / `missing`，不会打印 Key 内容
+
+### 仅 API
+
+```bash
+npm run start:api
+```
+
+### 仅前端
+
+```bash
+npm run dev:web
+```
+
+## 环境变量
+
+| 变量 | 说明 |
+| --- | --- |
+| `aliQwen-api` | **本地优先**：系统/用户环境变量中的百炼 Key（含连字符）；服务端 `process.env['aliQwen-api']` |
+| `BAILIAN_API_KEY` | 兼容回退名；`.env.local` 与 **Vercel 推荐用此名**（平台变量名通常不允许连字符） |
+| `TURSO_DATABASE_URL` | Turso 数据库 URL；未配置则进程内内存存储 |
+| `TURSO_AUTH_TOKEN` | Turso Auth Token |
+| `API_PORT` | 本地 API 端口，默认 `3001` |
+
+读取顺序：`aliQwen-api` → `BAILIAN_API_KEY`。二者择一即可；本地已设系统变量时不必再写 `.env.local`。
+
+密钥规则：
+
+- **永不进 git**（`.gitignore` 覆盖 `.env*`，仅保留 `.env.example`）
+- 不进前端包、不进 API 响应、不进 Task 持久化字段、不进启动日志正文
+- 浏览器自配 Key **只存 localStorage**，配置 UI 标明「出于安全考虑不做服务端持久化」
+
+内置模型：
+
+- baseUrl：`https://maas.qianwenaiapi.com/compatible-mode/v1`
+- models：`qwen3.8-omni-flash` / `qwen3.8-max` / `qwen3.8-flash`
+
+## 部署（Vercel）
+
+代码侧已准备 `vercel.json` 与 `api/[[...path]].ts` catch-all。
+
+1. 将仓库设为 **public**（笔试要求）
+2. 在 Vercel Import 本仓库
+3. 配置环境变量槽位：`BAILIAN_API_KEY`（**不要依赖** `aliQwen-api`：Vercel 变量名通常不允许连字符）、`TURSO_DATABASE_URL`、`TURSO_AUTH_TOKEN`
+4. 部署后访问 `/api/health` 冒烟（`bailianConfigured: true` 表示 Key 已生效）
+
+> 本 README **不假装已部署成功**。公网 URL 需你在 Vercel 账号完成首次部署后回填到提交材料。
+
+当前公网 URL：（部署后填写）
+
+## 使用路径
+
+1. **访客**：输入 Prompt → 生成 → iframe 预览；失败/超时可 mock 或点预置示例；**不能保存**
+2. **已登录**：登记邮箱 → 新建/打开 Task → 生成 →「保存到 Task」覆盖写 → 刷新后从列表回看
+3. **交卷主路径**：配置真实百炼 Key（本地 `aliQwen-api` 或 `BAILIAN_API_KEY`；Vercel 用 `BAILIAN_API_KEY`）+（建议）Turso，走内置生成而非 mock
+
+## 剩余能力
+
+- Horse Race（并行两路 + 用户择优）：未实现；核心闭环优先。后续可按 `openspec/changes/mini-atoms-demo/specs/horse-race/spec.md` 补齐。
+
+## 避坑对照
+
+- public 仓库 + 可访问链接
+- Key 不入库、不进 git
+- 真实交互（iframe + scripts）+ 登录后持久化
+- mock 是保险丝，不是交卷内容

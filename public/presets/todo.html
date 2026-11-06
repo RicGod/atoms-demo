@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>迷你待办</title>
+  <style>
+    body {
+      margin: 0; min-height: 100vh; font-family: Georgia, "Times New Roman", serif;
+      background: radial-gradient(circle at top, #fff7ed, #fed7aa 40%, #9a3412);
+      display: grid; place-items: center; color: #431407;
+    }
+    .wrap {
+      width: min(420px, 92vw); background: rgba(255,251,235,.95);
+      border-radius: 18px; padding: 1.4rem; box-shadow: 0 18px 40px rgba(0,0,0,.2);
+    }
+    h1 { margin: 0 0 .8rem; font-size: 1.35rem; }
+    form { display: flex; gap: .5rem; margin-bottom: 1rem; }
+    input {
+      flex: 1; border: 1px solid #fdba74; border-radius: 10px; padding: .65rem .8rem;
+      font: inherit; background: #fff;
+    }
+    button {
+      border: 0; border-radius: 10px; background: #c2410c; color: #fff;
+      padding: .65rem 1rem; cursor: pointer; font: inherit;
+    }
+    ul { list-style: none; padding: 0; margin: 0; }
+    li {
+      display: flex; align-items: center; gap: .6rem; padding: .55rem .2rem;
+      border-bottom: 1px dashed #fdba74;
+    }
+    li.done span { text-decoration: line-through; opacity: .55; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>预置示例 · 待办</h1>
+    <form id="f">
+      <input id="t" placeholder="写一件事…" required />
+      <button type="submit">添加</button>
+    </form>
+    <ul id="list"></ul>
+  </div>
+  <script>
+    const list = document.getElementById('list');
+    document.getElementById('f').onsubmit = (e) => {
+      e.preventDefault();
+      const input = document.getElementById('t');
+      const text = input.value.trim();
+      if (!text) return;
+      const li = document.createElement('li');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.onchange = () => li.classList.toggle('done', cb.checked);
+      const span = document.createElement('span');
+      span.textContent = text;
+      li.append(cb, span);
+      list.prepend(li);
+      input.value = '';
+    };
+  </script>
+</body>
+</html>
