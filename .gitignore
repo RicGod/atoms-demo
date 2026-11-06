@@ -24,8 +24,16 @@ Thumbs.db
 .vercel/
 *.tsbuildinfo
 
-# Playwright
+# Playwright（产物已忽略；e2e 用例仅本地，不进仓）
 /test-results/
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+e2e/
+
+# 笔试/本地流程材料（与应用源码无关，不提交）
+笔试准备清单.md
+Atoms笔试避坑指南.docx
+*笔试*.md
+*笔试*.docx
+*笔试*.doc

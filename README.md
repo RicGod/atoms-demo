@@ -29,6 +29,7 @@ npm test
 
 # 端到端（Playwright；默认用本机 Chrome channel，无需下载自带 Chromium）
 # 会自动起 npm run dev；用例内 mock /api/generate，不依赖真 Key
+# 注意：e2e/ 仅本地保留、未进仓；需本机已有 e2e 目录与用例后再跑 test:e2e
 npm run test:e2e
 ```
 
