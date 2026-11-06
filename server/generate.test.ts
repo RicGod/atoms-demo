@@ -2,7 +2,7 @@ import request from 'supertest'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createApp, type StreamHtmlFn } from './app.js'
 import { ALIQWEN_API_ENV, BAILIAN_API_ENV } from './lib/bailian-env.js'
-import type { StreamResult } from './lib/bailian.js'
+import { buildUserContent, type StreamResult } from './lib/bailian.js'
 
 /**
  * 解析 SSE 文本为事件列表（event + data JSON）
@@ -23,6 +23,23 @@ function parseSse(raw: string): Array<{ event: string; data: unknown }> {
   }
   return events
 }
+
+describe('buildUserContent', () => {
+  it('拼装历史摘要与当前 HTML', () => {
+    const text = buildUserContent({
+      prompt: '加个计分板',
+      messages: [
+        { role: 'user', content: '做个贪吃蛇' },
+        { role: 'assistant', content: '已完成基础版' },
+      ],
+      currentHtml: '<html><body>snake</body></html>',
+    })
+    expect(text).toContain('对话历史摘要')
+    expect(text).toContain('当前 HTML')
+    expect(text).toContain('加个计分板')
+    expect(text).toContain('snake')
+  })
+})
 
 describe('POST /api/generate', () => {
   const savedAli = process.env[ALIQWEN_API_ENV]
@@ -95,6 +112,42 @@ describe('POST /api/generate', () => {
     expect(events.at(-1)?.data).toMatchObject({ ok: true, mode: 'builtin' })
   })
 
+  it('传递 messages 与 currentHtml 给 streamHtml（迭代）', async () => {
+    process.env[BAILIAN_API_ENV] = 'test-fake-key-not-real'
+
+    let seen: {
+      messages?: { role: string; content: string }[]
+      currentHtml?: string
+      prompt?: string
+    } = {}
+
+    const streamHtml: StreamHtmlFn = async (opts) => {
+      seen = {
+        messages: opts.messages,
+        currentHtml: opts.currentHtml,
+        prompt: opts.prompt,
+      }
+      return { ok: true, html: '<html><body>iter</body></html>' }
+    }
+
+    const app = createApp({ streamHtml })
+    const res = await request(app)
+      .post('/api/generate')
+      .send({
+        prompt: '加排行榜',
+        messages: [
+          { role: 'user', content: '做贪吃蛇' },
+          { role: 'assistant', content: '完成' },
+        ],
+        currentHtml: '<html>old</html>',
+      })
+
+    expect(res.status).toBe(200)
+    expect(seen.prompt).toBe('加排行榜')
+    expect(seen.currentHtml).toBe('<html>old</html>')
+    expect(seen.messages?.[0]?.content).toBe('做贪吃蛇')
+  })
+
   it('mock LLM 返回额度错误时 error.kind=quota 且 suggestByok', async () => {
     process.env[BAILIAN_API_ENV] = 'test-fake-key-not-real'
 
@@ -145,5 +198,73 @@ describe('POST /api/generate', () => {
     const res = await request(app).post('/api/generate').send({ prompt: '  ' })
     expect(res.status).toBe(400)
     expect(res.body.ok).toBe(false)
+  })
+})
+
+describe('POST /api/race', () => {
+  const savedAli = process.env[ALIQWEN_API_ENV]
+  const savedBailian = process.env[BAILIAN_API_ENV]
+
+  afterEach(() => {
+    if (savedAli === undefined) delete process.env[ALIQWEN_API_ENV]
+    else process.env[ALIQWEN_API_ENV] = savedAli
+    if (savedBailian === undefined) delete process.env[BAILIAN_API_ENV]
+    else process.env[BAILIAN_API_ENV] = savedBailian
+  })
+
+  it('无 Key 时 503', async () => {
+    delete process.env[ALIQWEN_API_ENV]
+    delete process.env[BAILIAN_API_ENV]
+    const app = createApp({
+      streamHtml: async () => ({ ok: true, html: '<html/>' }),
+    })
+    const res = await request(app).post('/api/race').send({ prompt: '赛马' })
+    expect(res.status).toBe(503)
+    expect(res.body.suggestByok).toBe(true)
+  })
+
+  it('并行两路不同模型并返回 candidates', async () => {
+    process.env[BAILIAN_API_ENV] = 'test-fake-key-not-real'
+    const modelsSeen: string[] = []
+
+    const streamHtml: StreamHtmlFn = async ({ model }) => {
+      modelsSeen.push(model)
+      return {
+        ok: true,
+        html: `<html><body>${model}</body></html>`,
+      }
+    }
+
+    const app = createApp({ streamHtml })
+    const res = await request(app)
+      .post('/api/race')
+      .send({ prompt: '做一个时钟' })
+
+    expect(res.status).toBe(200)
+    expect(res.body.ok).toBe(true)
+    expect(res.body.candidates).toHaveLength(2)
+    expect(res.body.candidates[0].ok).toBe(true)
+    expect(res.body.candidates[1].ok).toBe(true)
+    expect(modelsSeen[0]).not.toBe(modelsSeen[1])
+  })
+
+  it('一路失败时仍 ok=true 并保留成功候选', async () => {
+    process.env[BAILIAN_API_ENV] = 'test-fake-key-not-real'
+    let n = 0
+    const streamHtml: StreamHtmlFn = async () => {
+      n += 1
+      if (n === 1) {
+        return { ok: false, kind: 'error', message: 'lane A fail' }
+      }
+      return { ok: true, html: '<html><body>B</body></html>' }
+    }
+
+    const app = createApp({ streamHtml })
+    const res = await request(app).post('/api/race').send({ prompt: '半失败' })
+    expect(res.body.ok).toBe(true)
+    const okCount = res.body.candidates.filter(
+      (c: { ok: boolean }) => c.ok,
+    ).length
+    expect(okCount).toBe(1)
   })
 })

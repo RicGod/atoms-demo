@@ -36,6 +36,6 @@ app.listen(port, () => {
   console.log(`[api] listening on http://127.0.0.1:${port}`)
   console.log(`[api] bailian key: ${bailianKeyPresenceLabel()}`)
   console.log(
-    `[api] Turso: ${process.env.TURSO_DATABASE_URL?.trim() && process.env.TURSO_AUTH_TOKEN?.trim() ? 'configured' : 'memory fallback'}`,
+    `[api] Turso: ${process.env.TURSO_DATABASE_URL?.trim() && process.env.TURSO_AUTH_TOKEN?.trim() ? 'configured' : 'missing (required)'}`,
   )
 })

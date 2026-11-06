@@ -15,10 +15,10 @@ describe('GET /api/health', () => {
     expect(res.body.ok).toBe(true)
     expect(typeof res.body.bailianConfigured).toBe('boolean')
     expect(typeof res.body.tursoConfigured).toBe('boolean')
-    // storage 仅允许 turso | memory，与是否配置 Turso 一致
-    expect(['turso', 'memory']).toContain(res.body.storage)
+    // 已取消内存降级：storage 仅 turso | unconfigured
+    expect(['turso', 'unconfigured']).toContain(res.body.storage)
     expect(res.body.storage).toBe(
-      res.body.tursoConfigured ? 'turso' : 'memory',
+      res.body.tursoConfigured ? 'turso' : 'unconfigured',
     )
     // 响应不得夹带密钥字段
     expect(res.body).not.toHaveProperty('apiKey')

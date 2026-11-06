@@ -14,16 +14,8 @@ export type TaskRecord = {
   updatedAt: string
 }
 
-/** 内存降级存储：未配置 Turso 时仍可本地联调 */
-const memory = new Map<string, TaskRecord>()
-
 let client: Client | null = null
 let schemaReady = false
-
-/** 测试专用：清空内存仓储，避免用例互相污染 */
-export function clearMemoryTasks(): void {
-  memory.clear()
-}
 
 function getTursoEnv() {
   return {
@@ -32,15 +24,35 @@ function getTursoEnv() {
   }
 }
 
+/** 是否已配置 Turso（本地与 Render 均要求 URL + Token） */
 export function isTursoConfigured(): boolean {
   const { url, authToken } = getTursoEnv()
   return Boolean(url && authToken)
 }
 
-function getClient(): Client | null {
-  if (!isTursoConfigured()) return null
+/**
+ * 测试专用：关闭并丢弃单例客户端与 schema 标记。
+ * 用例切换 env / 换 :memory: 库后必须调用，避免连到旧连接。
+ */
+export function resetTasksClientForTests(): void {
+  // Windows 下不 close 再删 file DB 会 EBUSY；:memory: 也需释放连接
+  if (client && !client.closed) {
+    client.close()
+  }
+  client = null
+  schemaReady = false
+}
+
+/** 未配置时直接失败，不再降级内存 */
+function requireClient(): Client {
+  if (!isTursoConfigured()) {
+    throw new Error(
+      '未配置 Turso：请设置 TURSO_DATABASE_URL 与 TURSO_AUTH_TOKEN',
+    )
+  }
   if (!client) {
     const { url, authToken } = getTursoEnv()
+    // authToken 对远程 libsql 必需；本地 file: 测试库也会传入占位值
     client = createClient({ url, authToken })
   }
   return client
@@ -49,11 +61,7 @@ function getClient(): Client | null {
 /** 建表：仅存业务字段，禁止密钥 / Score */
 async function ensureSchema(): Promise<void> {
   if (schemaReady) return
-  const db = getClient()
-  if (!db) {
-    schemaReady = true
-    return
-  }
+  const db = requireClient()
   await db.execute(`
     CREATE TABLE IF NOT EXISTS tasks (
       id TEXT PRIMARY KEY,
@@ -117,11 +125,7 @@ export async function createTask(input: {
   }
   assertNoSecrets(record as unknown as Record<string, unknown>)
 
-  const db = getClient()
-  if (!db) {
-    memory.set(record.id, record)
-    return record
-  }
+  const db = requireClient()
   await db.execute({
     sql: `INSERT INTO tasks (id, email, title, prompt, html, generation_mode, source, created_at, updated_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -145,13 +149,7 @@ export async function listTasks(email: string): Promise<TaskRecord[]> {
   const normalized = normalizeEmail(email)
   if (!normalized) return []
 
-  const db = getClient()
-  if (!db) {
-    return [...memory.values()]
-      .filter((t) => t.email === normalized)
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-  }
-
+  const db = requireClient()
   const rs = await db.execute({
     sql: `SELECT * FROM tasks WHERE email = ? ORDER BY updated_at DESC`,
     args: [normalized],
@@ -165,12 +163,7 @@ export async function getTask(
 ): Promise<TaskRecord | null> {
   await ensureSchema()
   const normalized = normalizeEmail(email)
-  const db = getClient()
-  if (!db) {
-    const t = memory.get(id)
-    if (!t || t.email !== normalized) return null
-    return t
-  }
+  const db = requireClient()
   const rs = await db.execute({
     sql: `SELECT * FROM tasks WHERE id = ? AND email = ? LIMIT 1`,
     args: [id, normalized],
@@ -204,11 +197,7 @@ export async function saveTaskArtifact(input: {
   }
   assertNoSecrets(updated as unknown as Record<string, unknown>)
 
-  const db = getClient()
-  if (!db) {
-    memory.set(updated.id, updated)
-    return updated
-  }
+  const db = requireClient()
   await db.execute({
     sql: `UPDATE tasks SET title = ?, prompt = ?, html = ?, generation_mode = ?, source = ?, updated_at = ?
           WHERE id = ? AND email = ?`,

@@ -17,7 +17,7 @@ services:
       # 百炼 Key（平台变量名勿用连字符；勿依赖 aliQwen-api）
       - key: BAILIAN_API_KEY
         sync: false
-      # Turso 持久化（可选；未配则进程内内存）
+      # Turso 持久化（必填；未配则 Task API 失败）
       - key: TURSO_DATABASE_URL
         sync: false
       - key: TURSO_AUTH_TOKEN

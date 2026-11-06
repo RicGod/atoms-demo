@@ -1,9 +1,31 @@
 import type { GenerationMode, TaskDetail, TaskSummary } from './types'
 
+export type ChatTurn = { role: 'user' | 'assistant'; content: string }
+
+export type RaceCandidate =
+  | {
+      lane: 'A' | 'B'
+      model: string
+      ok: true
+      html: string
+      mode: GenerationMode
+    }
+  | {
+      lane: 'A' | 'B'
+      model: string
+      ok: false
+      kind?: string
+      message: string
+    }
+
 /** 解析服务端 SSE（内置生成） */
 export async function generateBuiltin(options: {
   prompt: string
   model: string
+  /** 对话历史，供服务端摘要进迭代上下文 */
+  messages?: ChatTurn[]
+  /** 当前 HTML，整页覆盖生成 */
+  currentHtml?: string
   onChunk?: (text: string) => void
   signal?: AbortSignal
 }): Promise<
@@ -18,7 +40,12 @@ export async function generateBuiltin(options: {
   const res = await fetch('/api/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt: options.prompt, model: options.model }),
+    body: JSON.stringify({
+      prompt: options.prompt,
+      model: options.model,
+      messages: options.messages,
+      currentHtml: options.currentHtml,
+    }),
     signal: options.signal,
   })
 
@@ -91,6 +118,54 @@ export async function generateBuiltin(options: {
   }
 }
 
+/**
+ * 赛马：服务端并行两次 generate，返回两路候选（无自动打分）
+ * 仅登录用户应调用；访客前端禁用
+ */
+export async function raceBuiltin(options: {
+  prompt: string
+  messages?: ChatTurn[]
+  currentHtml?: string
+  models?: [string, string]
+}): Promise<
+  | { ok: true; candidates: RaceCandidate[] }
+  | { ok: false; message: string; suggestByok?: boolean; candidates?: RaceCandidate[] }
+> {
+  const res = await fetch('/api/race', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      prompt: options.prompt,
+      messages: options.messages,
+      currentHtml: options.currentHtml,
+      models: options.models,
+    }),
+  })
+  const json = (await res.json()) as {
+    ok: boolean
+    candidates?: RaceCandidate[]
+    error?: string
+    suggestByok?: boolean
+  }
+  if (!res.ok) {
+    return {
+      ok: false,
+      message: json.error || `HTTP ${res.status}`,
+      suggestByok: json.suggestByok,
+      candidates: json.candidates,
+    }
+  }
+  const candidates = json.candidates ?? []
+  if (!candidates.some((c) => c.ok)) {
+    return {
+      ok: false,
+      message: '两路赛马均失败',
+      candidates,
+    }
+  }
+  return { ok: true, candidates }
+}
+
 export async function fetchTasks(email: string): Promise<TaskSummary[]> {
   const res = await fetch(`/api/tasks?email=${encodeURIComponent(email)}`)
   const json = (await res.json()) as {
@@ -98,15 +173,19 @@ export async function fetchTasks(email: string): Promise<TaskSummary[]> {
     tasks?: TaskSummary[]
     error?: string
   }
-  if (!json.ok) throw new Error(json.error || '加载任务失败')
+  if (!json.ok) throw new Error(json.error || '加载项目失败')
   return json.tasks ?? []
 }
 
-export async function createTask(email: string, title?: string) {
+export async function createTask(
+  email: string,
+  title?: string,
+  prompt?: string,
+) {
   const res = await fetch('/api/tasks', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, title }),
+    body: JSON.stringify({ email, title, prompt }),
   })
   const json = (await res.json()) as {
     ok: boolean
@@ -137,6 +216,7 @@ export async function saveTask(input: {
   html: string
   generationMode: GenerationMode
   source?: 'single' | 'horse-race'
+  title?: string
 }) {
   const res = await fetch(`/api/tasks/${encodeURIComponent(input.id)}`, {
     method: 'PUT',

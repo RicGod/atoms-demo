@@ -1,18 +1,22 @@
 import request from 'supertest'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createApp } from './app.js'
-import { clearMemoryTasks } from './lib/tasks.js'
+import { resetTasksClientForTests } from './lib/tasks.js'
 
 /**
  * S4 seam：tasks API
- * 无邮箱 403；邮箱 create→save→list→get；邮箱隔离；强制走内存仓储
+ * 无邮箱 403；邮箱 create→save→list→get；邮箱隔离；强制 libSQL（无内存 Map）
  */
-describe('tasks API（内存仓储）', () => {
+describe('tasks API（libSQL）', () => {
   beforeEach(() => {
-    // 确保未配 Turso 时走内存；并清空上次用例残留
-    delete process.env.TURSO_DATABASE_URL
-    delete process.env.TURSO_AUTH_TOKEN
-    clearMemoryTasks()
+    // 每个用例独立 :memory: 库，避免互相污染、也不碰 Windows 文件锁
+    resetTasksClientForTests()
+    process.env.TURSO_DATABASE_URL = ':memory:'
+    process.env.TURSO_AUTH_TOKEN = 'local-test-token'
+  })
+
+  afterEach(() => {
+    resetTasksClientForTests()
   })
 
   it('无邮箱时 create / save / list / get 均 403', async () => {
@@ -31,6 +35,19 @@ describe('tasks API（内存仓储）', () => {
 
     const getRes = await request(app).get('/api/tasks/any-id')
     expect(getRes.status).toBe(403)
+  })
+
+  it('未配置 Turso 时 Task 写操作失败', async () => {
+    delete process.env.TURSO_DATABASE_URL
+    delete process.env.TURSO_AUTH_TOKEN
+    resetTasksClientForTests()
+
+    const app = createApp()
+    const res = await request(app)
+      .post('/api/tasks')
+      .send({ email: 'x@ex.com', title: 't' })
+    expect(res.status).toBe(500)
+    expect(res.body.error).toMatch(/未配置 Turso/)
   })
 
   it('邮箱 create → save → list → get 闭环', async () => {

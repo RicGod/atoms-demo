@@ -6,7 +6,11 @@ import {
   type GenerationMode,
   type TaskSource,
 } from '../shared/constants.js'
-import { streamBuiltinHtml, type StreamResult } from './lib/bailian.js'
+import {
+  streamBuiltinHtml,
+  type ChatTurn,
+  type StreamResult,
+} from './lib/bailian.js'
 import { getBailianApiKey, isBailianConfigured } from './lib/bailian-env.js'
 import {
   createTask,
@@ -21,6 +25,8 @@ export type StreamHtmlFn = (options: {
   prompt: string
   model: BuiltinModel
   apiKey: string
+  messages?: ChatTurn[]
+  currentHtml?: string
   onChunk?: (text: string) => void
   signal?: AbortSignal
 }) => Promise<StreamResult>
@@ -28,6 +34,22 @@ export type StreamHtmlFn = (options: {
 export type CreateAppOptions = {
   /** 默认走真实百炼；单测注入 mock provider */
   streamHtml?: StreamHtmlFn
+}
+
+/** 规范化前端传入的对话历史 */
+function parseMessages(raw: unknown): ChatTurn[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const out: ChatTurn[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const role = (item as { role?: string }).role
+    const content = String((item as { content?: unknown }).content ?? '').trim()
+    if (!content) continue
+    if (role === 'user' || role === 'assistant') {
+      out.push({ role, content })
+    }
+  }
+  return out.length ? out : undefined
 }
 
 /** 创建 Express 应用：本地 / Render Node 与可选 Vercel serverless 共用 */
@@ -47,7 +69,8 @@ export function createApp(options: CreateAppOptions = {}) {
       // 只暴露是否已配置，不回传 Key
       bailianConfigured: isBailianConfigured(),
       tursoConfigured: isTursoConfigured(),
-      storage: isTursoConfigured() ? 'turso' : 'memory',
+      // 已取消内存降级：未配置时为 unconfigured，Task API 会 500
+      storage: isTursoConfigured() ? 'turso' : 'unconfigured',
     })
   })
 
@@ -58,7 +81,7 @@ export function createApp(options: CreateAppOptions = {}) {
 
   /**
    * 服务端内置生成（流式 SSE）
-   * body: { prompt, model?, guest?: boolean }
+   * body: { prompt, model?, messages?, currentHtml?, guest?: boolean }
    * 注意：响应中永不回传 API Key（aliQwen-api / BAILIAN_API_KEY）
    */
   app.post('/api/generate', async (req: Request, res: Response) => {
@@ -72,6 +95,12 @@ export function createApp(options: CreateAppOptions = {}) {
     const model = (BUILTIN_MODELS as readonly string[]).includes(modelRaw)
       ? (modelRaw as BuiltinModel)
       : BUILTIN_MODELS[0]
+
+    const messages = parseMessages(req.body?.messages)
+    const currentHtml =
+      typeof req.body?.currentHtml === 'string'
+        ? req.body.currentHtml
+        : undefined
 
     // 优先 aliQwen-api，回退 BAILIAN_API_KEY
     const apiKey = getBailianApiKey()
@@ -105,6 +134,8 @@ export function createApp(options: CreateAppOptions = {}) {
       prompt,
       model,
       apiKey,
+      messages,
+      currentHtml,
       onChunk: (text) => send('chunk', { text }),
       signal: req.aborted ? AbortSignal.abort() : undefined,
     })
@@ -123,6 +154,91 @@ export function createApp(options: CreateAppOptions = {}) {
       send('done', { ok: false, kind: result.kind })
     }
     res.end()
+  })
+
+  /**
+   * 赛马薄封装：固定两路并行 generate（不同内置模型）
+   * 仅语义封装；鉴权由前端保证「已登录才调用」
+   * body: { prompt, messages?, currentHtml?, models?: [m1,m2] }
+   */
+  app.post('/api/race', async (req: Request, res: Response) => {
+    const prompt = String(req.body?.prompt ?? '').trim()
+    if (!prompt) {
+      res.status(400).json({ ok: false, error: 'Prompt 不能为空' })
+      return
+    }
+
+    const messages = parseMessages(req.body?.messages)
+    const currentHtml =
+      typeof req.body?.currentHtml === 'string'
+        ? req.body.currentHtml
+        : undefined
+
+    // 步骤：固定两路不同内置模型；非法输入回退前两个默认模型
+    const rawModels = Array.isArray(req.body?.models) ? req.body.models : []
+    const pickModel = (raw: unknown, fallback: BuiltinModel): BuiltinModel => {
+      const s = String(raw ?? '')
+      return (BUILTIN_MODELS as readonly string[]).includes(s)
+        ? (s as BuiltinModel)
+        : fallback
+    }
+    const modelA = pickModel(rawModels[0], BUILTIN_MODELS[0])
+    // 第二路尽量与第一路不同
+    const fallbackB =
+      BUILTIN_MODELS.find((m) => m !== modelA) ?? BUILTIN_MODELS[1]
+    const modelB = pickModel(rawModels[1], fallbackB)
+    const models: [BuiltinModel, BuiltinModel] = [
+      modelA,
+      modelB === modelA ? fallbackB : modelB,
+    ]
+
+    const apiKey = getBailianApiKey()
+    if (!apiKey) {
+      res.status(503).json({
+        ok: false,
+        error:
+          '服务端未配置百炼 Key，无法赛马；请配置后重试或改用自配模型（单路）',
+        suggestByok: true,
+      })
+      return
+    }
+
+    // 步骤：并行两次 streamHtml，不做自动打分
+    const runOne = async (model: BuiltinModel, lane: 'A' | 'B') => {
+      const result = await streamHtml({
+        prompt,
+        model,
+        apiKey,
+        messages,
+        currentHtml,
+      })
+      if (result.ok) {
+        return {
+          lane,
+          model,
+          ok: true as const,
+          html: result.html,
+          mode: 'builtin' as GenerationMode,
+        }
+      }
+      return {
+        lane,
+        model,
+        ok: false as const,
+        kind: result.kind,
+        message: result.message,
+      }
+    }
+
+    const [a, b] = await Promise.all([
+      runOne(models[0], 'A'),
+      runOne(models[1], 'B'),
+    ])
+
+    res.json({
+      ok: a.ok || b.ok,
+      candidates: [a, b],
+    })
   })
 
   // —— Task CRUD（按邮箱隔离）——

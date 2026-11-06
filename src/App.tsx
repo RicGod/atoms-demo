@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import { BUILTIN_MODELS } from '../shared/constants'
+import { ByokModal } from './components/ByokModal'
 import {
   createTask,
   fetchTasks,
   generateBuiltin,
   openTask,
+  raceBuiltin,
   saveTask,
+  type RaceCandidate,
 } from './lib/api'
 import { clearByok, loadByok, saveByok, streamByokHtml } from './lib/byok'
 import {
@@ -15,18 +18,26 @@ import {
   type GenerationMode,
   type TaskSummary,
 } from './lib/types'
+import { GuestHome } from './views/GuestHome'
+import { LoginView } from './views/LoginView'
+import { ProjectList } from './views/ProjectList'
+import {
+  chatToMessages,
+  Workspace,
+  type ChatItem,
+} from './views/Workspace'
 
+type View = 'home' | 'login' | 'projects' | 'workspace'
 type Status = { kind: 'idle' | 'info' | 'error'; text: string }
 
-const MODE_LABEL: Record<GenerationMode, string> = {
-  builtin: '内置',
-  byok: '自配',
-  mock: 'mock',
-}
+let seq = 0
+const nid = (prefix: string) => `${prefix}-${++seq}`
 
 export default function App() {
+  const [view, setView] = useState<View>('home')
   const [email, setEmail] = useState('')
   const [emailDraft, setEmailDraft] = useState('')
+
   const [prompt, setPrompt] = useState('做一个可点击的霓虹风格打卡按钮')
   const [model, setModel] = useState<string>(BUILTIN_MODELS[0])
   const [preferByok, setPreferByok] = useState(false)
@@ -36,20 +47,35 @@ export default function App() {
   const [html, setHtml] = useState('')
   const [mode, setMode] = useState<GenerationMode | null>(null)
   const [streaming, setStreaming] = useState(false)
+  const [racing, setRacing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [creating, setCreating] = useState(false)
   const [status, setStatus] = useState<Status>({ kind: 'idle', text: '' })
 
   const [tasks, setTasks] = useState<TaskSummary[]>([])
+  const [filter, setFilter] = useState<'all' | 'fav'>('all')
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
+  const [guestSession, setGuestSession] = useState(false)
+
+  const [chat, setChat] = useState<ChatItem[]>([])
+  const [draft, setDraft] = useState('')
+  const [pane, setPane] = useState<'preview' | 'code'>('preview')
+  // 版本号仅驱动装饰「版本 N」卡片，不用于回看
+  const [, setVersionN] = useState(0)
+  const [raceCandidates, setRaceCandidates] = useState<RaceCandidate[] | null>(
+    null,
+  )
+  const [lastSource, setLastSource] = useState<'single' | 'horse-race'>('single')
 
   const signedIn = Boolean(email.trim())
 
-  // 启动时恢复上次邮箱与自配配置（仅本机）
+  // 步骤：启动时恢复邮箱与自配（自配 UI 仅登录后展示）
   useEffect(() => {
     const saved = localStorage.getItem(EMAIL_STORAGE_KEY) || ''
     if (saved) {
       setEmail(saved)
       setEmailDraft(saved)
+      setView('projects')
     }
     const cfg = loadByok()
     if (cfg) {
@@ -61,7 +87,6 @@ export default function App() {
   useEffect(() => {
     if (!signedIn) {
       setTasks([])
-      setActiveTaskId(null)
       return
     }
     void refreshTasks(email)
@@ -79,6 +104,12 @@ export default function App() {
     }
   }
 
+  const activeTitle = useMemo(() => {
+    if (guestSession) return draft.trim() || prompt.slice(0, 24) || '访客预览'
+    const t = tasks.find((x) => x.id === activeTaskId)
+    return t?.title || t?.prompt?.slice(0, 32) || '项目'
+  }, [guestSession, draft, prompt, tasks, activeTaskId])
+
   const onLogin = () => {
     const next = emailDraft.trim()
     if (!next || !next.includes('@')) {
@@ -87,6 +118,9 @@ export default function App() {
     }
     setEmail(next)
     localStorage.setItem(EMAIL_STORAGE_KEY, next)
+    setGuestSession(false)
+    setActiveTaskId(null)
+    setView('projects')
     setStatus({
       kind: 'info',
       text: '已登记邮箱。MVP 无验证码，存在冒充风险。',
@@ -95,9 +129,14 @@ export default function App() {
 
   const onLogout = () => {
     setEmail('')
+    localStorage.removeItem(EMAIL_STORAGE_KEY)
     setActiveTaskId(null)
     setTasks([])
-    setStatus({ kind: 'info', text: '已退出登录（访客模式）' })
+    setGuestSession(false)
+    setChat([])
+    setHtml('')
+    setView('home')
+    setStatus({ kind: 'info', text: '已退出（访客模式）' })
   }
 
   const loadPreset = async (path: string) => {
@@ -105,165 +144,233 @@ export default function App() {
     const text = await res.text()
     setHtml(text)
     setMode('mock')
+    setGuestSession(true)
+    setActiveTaskId(null)
+    setChat([
+      {
+        kind: 'assistant',
+        id: nid('a'),
+        text: `已加载预置示例（mock）：${path}`,
+      },
+    ])
+    setVersionN(1)
+    setView('workspace')
+    setPane('preview')
     setStatus({ kind: 'info', text: '已加载预置示例（mock）' })
   }
 
-  /** 访客失败/超时兜底：随机一个预置示例 */
+  /** 访客失败/超时兜底：随机预置 */
   const fallbackMock = async (reason: string) => {
     const pick = PRESETS[Math.floor(Math.random() * PRESETS.length)]
     await loadPreset(pick.path)
     setStatus({
       kind: 'info',
-      text: `${reason}；已切换预置示例「${pick.label}」（mock，非交卷主路径）`,
+      text: `${reason}；已切换预置「${pick.label}」（mock）`,
     })
   }
 
-  const runGenerate = async () => {
-    const p = prompt.trim()
+  const enterWorkspaceFresh = (opts: {
+    guest: boolean
+    taskId: string | null
+    titleHint?: string
+    existingHtml?: string
+    existingPrompt?: string
+    existingMode?: GenerationMode | null
+  }) => {
+    setGuestSession(opts.guest)
+    setActiveTaskId(opts.taskId)
+    setRaceCandidates(null)
+    setLastSource('single')
+    setPane('preview')
+    if (opts.existingHtml) {
+      setHtml(opts.existingHtml)
+      setMode(opts.existingMode ?? 'builtin')
+      setChat([
+        {
+          kind: 'assistant',
+          id: nid('a'),
+          text: '已打开项目当前产物，可继续对话迭代。',
+        },
+        {
+          kind: 'version',
+          id: nid('v'),
+          n: 1,
+          label: '当前已保存版本（装饰，不可回看历史）',
+        },
+      ])
+      setVersionN(1)
+      if (opts.existingPrompt) setDraft('')
+    } else {
+      setHtml('')
+      setMode(null)
+      setChat([])
+      setVersionN(0)
+      if (opts.titleHint) setDraft(opts.titleHint)
+    }
+    setView('workspace')
+  }
+
+  /** 单路生成 / 对话迭代 */
+  const runGenerate = async (userText: string) => {
+    const p = userText.trim()
     if (!p) {
       setStatus({ kind: 'error', text: 'Prompt 不能为空' })
       return
     }
-    if (signedIn && !activeTaskId) {
-      setStatus({
-        kind: 'error',
-        text: '已登录：请先新建或打开 Task，再生成并保存',
-      })
+    if (signedIn && !guestSession && !activeTaskId) {
+      setStatus({ kind: 'error', text: '请先新建或打开项目' })
       return
     }
 
     setStreaming(true)
+    setRaceCandidates(null)
     setStatus({ kind: 'info', text: '生成中…' })
-    setHtml('')
-    setMode(null)
+    const userMsg: ChatItem = { kind: 'user', id: nid('u'), text: p }
+    setChat((prev) => [...prev, userMsg])
+    setDraft('')
+
+    const history = chatToMessages([...chat, userMsg])
+    const currentHtml = html || undefined
 
     try {
-      // 优先自配（用户显式开启且已配置）
-      if (preferByok && byok) {
+      // 步骤：登录用户可优先自配；访客仅内置 / mock
+      if (signedIn && preferByok && byok) {
         const result = await streamByokHtml({
           prompt: p,
           config: byok,
-          onChunk: () => {
-            /* 流式过程可扩展预览草稿 */
-          },
+          currentHtml,
+          messages: history,
         })
         if (result.ok) {
-          setHtml(result.html)
-          setMode('byok')
-          setStatus({ kind: 'info', text: '自配模型生成完成' })
+          applySuccess(p, result.html, 'byok', 'single')
           return
         }
-        // 自配失败：已登录提示重试；访客可 mock
-        if (!signedIn) {
-          await fallbackMock(`自配失败：${result.message}`)
-        } else {
-          setStatus({
-            kind: 'error',
-            text: `自配失败：${result.message}。可重试 / 换模型 / 检查自配配置`,
-          })
-        }
+        setStatus({
+          kind: 'error',
+          text: `自配失败：${result.message}`,
+        })
+        setChat((prev) => [
+          ...prev,
+          { kind: 'assistant', id: nid('a'), text: `自配失败：${result.message}` },
+        ])
         return
       }
 
       const result = await generateBuiltin({
         prompt: p,
         model,
+        messages: history,
+        currentHtml,
       })
 
       if (result.ok) {
-        setHtml(result.html)
-        setMode(result.mode)
-        setStatus({ kind: 'info', text: '内置模型生成完成' })
+        applySuccess(p, result.html, result.mode, 'single')
         return
       }
 
-      const msg = result.message
-      if (result.suggestByok) {
-        setShowByok(true)
-      }
-
-      if (!signedIn) {
-        await fallbackMock(msg || '内置生成失败')
+      if (!signedIn || guestSession) {
+        await fallbackMock(result.message || '内置生成失败')
       } else {
         setStatus({
           kind: 'error',
-          text: `${msg || '生成失败'}。请重试 / 换模型 / 配置自配 Key（不以 mock 为主出路）`,
+          text: `${result.message || '生成失败'}。可重试 / 换模型 / 配置自配`,
         })
+        if (result.suggestByok) setShowByok(true)
+        setChat((prev) => [
+          ...prev,
+          {
+            kind: 'assistant',
+            id: nid('a'),
+            text: result.message || '生成失败',
+          },
+        ])
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      if (!signedIn) {
+      if (!signedIn || guestSession) {
         await fallbackMock(msg)
       } else {
-        setStatus({
-          kind: 'error',
-          text: `${msg}。请重试 / 换模型 / 自配`,
-        })
+        setStatus({ kind: 'error', text: msg })
       }
     } finally {
       setStreaming(false)
     }
   }
 
-  const onCreateTask = async () => {
-    if (!signedIn) return
-    try {
-      const task = await createTask(email, prompt.trim().slice(0, 40) || undefined)
-      setActiveTaskId(task.id)
-      await refreshTasks(email)
-      setStatus({ kind: 'info', text: `已新建 Task：${task.title}` })
-    } catch (e) {
-      setStatus({
-        kind: 'error',
-        text: e instanceof Error ? e.message : String(e),
-      })
+  const applySuccess = (
+    userPrompt: string,
+    nextHtml: string,
+    nextMode: GenerationMode,
+    source: 'single' | 'horse-race',
+  ) => {
+    setHtml(nextHtml)
+    setMode(nextMode)
+    setLastSource(source)
+    setPrompt(userPrompt)
+    // 步骤：用函数式更新版本号，避免闭包陈旧
+    setVersionN((n) => {
+      const nextVer = n + 1
+      setChat((prev) => [
+        ...prev,
+        {
+          kind: 'assistant',
+          id: nid('a'),
+          text:
+            source === 'horse-race'
+              ? '已选定赛马 Winner，整页已更新。'
+              : '已根据本轮需求覆盖生成完整 HTML。',
+        },
+        {
+          kind: 'version',
+          id: nid('v'),
+          n: nextVer,
+          label:
+            source === 'horse-race'
+              ? '赛马择优完成（装饰版本号，不可回看）'
+              : '完成整页覆盖生成（装饰版本号，不可回看）',
+        },
+      ])
+      return nextVer
+    })
+    setStatus({
+      kind: 'info',
+      text:
+        source === 'horse-race'
+          ? '已选定 Winner'
+          : nextMode === 'builtin'
+            ? '内置模型生成完成'
+            : nextMode === 'byok'
+              ? '自配模型生成完成'
+              : 'mock 完成',
+    })
+    setPane('preview')
+
+    // 步骤：已登录项目内自动覆盖保存，保证回看
+    if (signedIn && activeTaskId && !guestSession) {
+      void autoSave(userPrompt, nextHtml, nextMode, source)
     }
   }
 
-  const onOpenTask = async (id: string) => {
-    if (!signedIn) return
-    try {
-      const task = await openTask(email, id)
-      setActiveTaskId(task.id)
-      setPrompt(task.prompt || prompt)
-      if (task.html) {
-        setHtml(task.html)
-        setMode(task.generationMode)
-      }
-      setStatus({ kind: 'info', text: `已打开 Task：${task.title}` })
-    } catch (e) {
-      setStatus({
-        kind: 'error',
-        text: e instanceof Error ? e.message : String(e),
-      })
-    }
-  }
-
-  const onSave = async () => {
-    if (!signedIn) {
-      setStatus({ kind: 'error', text: '访客无法保存，请先登记邮箱' })
-      return
-    }
-    if (!activeTaskId) {
-      setStatus({ kind: 'error', text: '请先新建或打开 Task' })
-      return
-    }
-    if (!html.trim()) {
-      setStatus({ kind: 'error', text: '没有可保存的预览内容' })
-      return
-    }
+  const autoSave = async (
+    userPrompt: string,
+    nextHtml: string,
+    nextMode: GenerationMode,
+    source: 'single' | 'horse-race',
+  ) => {
+    if (!activeTaskId) return
     setSaving(true)
     try {
-      const task = await saveTask({
+      await saveTask({
         id: activeTaskId,
         email,
-        prompt: prompt.trim(),
-        html,
-        generationMode: mode ?? 'builtin',
-        source: 'single',
+        prompt: userPrompt,
+        html: nextHtml,
+        generationMode: nextMode,
+        source,
+        title: userPrompt.slice(0, 40),
       })
       await refreshTasks(email)
-      setStatus({ kind: 'info', text: `已覆盖保存到 Task（${task.updatedAt}）` })
+      setStatus({ kind: 'info', text: '已覆盖保存到项目' })
     } catch (e) {
       setStatus({
         kind: 'error',
@@ -274,198 +381,261 @@ export default function App() {
     }
   }
 
-  const activeTask = useMemo(
-    () => tasks.find((t) => t.id === activeTaskId) || null,
-    [tasks, activeTaskId],
-  )
+  /** 访客从首页发起：进入临时工作区再生成 */
+  const onGuestGenerate = async () => {
+    const p = prompt.trim()
+    if (!p) {
+      setStatus({ kind: 'error', text: 'Prompt 不能为空' })
+      return
+    }
+    // 步骤：进入访客工作区（不落库），再跑单路生成
+    setGuestSession(true)
+    setActiveTaskId(null)
+    setRaceCandidates(null)
+    setLastSource('single')
+    setPane('preview')
+    setHtml('')
+    setMode(null)
+    setVersionN(0)
+    setDraft('')
+    setView('workspace')
+    await runGenerateFromHome(p)
+  }
+
+  const runGenerateFromHome = async (p: string) => {
+    setStreaming(true)
+    setStatus({ kind: 'info', text: '生成中…' })
+    const userMsg: ChatItem = { kind: 'user', id: nid('u'), text: p }
+    setChat([userMsg])
+    try {
+      const result = await generateBuiltin({ prompt: p, model })
+      if (result.ok) {
+        setHtml(result.html)
+        setMode(result.mode)
+        setLastSource('single')
+        setVersionN(1)
+        setChat([
+          userMsg,
+          {
+            kind: 'assistant',
+            id: nid('a'),
+            text: '已生成可预览 HTML（访客不落库）。',
+          },
+          {
+            kind: 'version',
+            id: nid('v'),
+            n: 1,
+            label: '完成搭建（装饰版本号，不可回看）',
+          },
+        ])
+        setStatus({ kind: 'info', text: '内置模型生成完成' })
+        return
+      }
+      await fallbackMock(result.message || '内置生成失败')
+    } catch (e) {
+      await fallbackMock(e instanceof Error ? e.message : String(e))
+    } finally {
+      setStreaming(false)
+    }
+  }
+
+  const onRace = async () => {
+    // 步骤：访客禁用赛马
+    if (!signedIn || guestSession) {
+      setStatus({ kind: 'error', text: '访客不可使用赛马，请先登录' })
+      return
+    }
+    const p = (draft.trim() || prompt).trim()
+    if (!p) {
+      setStatus({ kind: 'error', text: '赛马需要 Prompt' })
+      return
+    }
+    if (!activeTaskId) {
+      setStatus({ kind: 'error', text: '请先打开项目再赛马' })
+      return
+    }
+
+    setRacing(true)
+    setRaceCandidates(null)
+    setStatus({ kind: 'info', text: '赛马进行中（两路并行）…' })
+    const userMsg: ChatItem = { kind: 'user', id: nid('u'), text: `[赛马] ${p}` }
+    setChat((prev) => [...prev, userMsg])
+
+    try {
+      const history = chatToMessages([...chat, userMsg])
+      const result = await raceBuiltin({
+        prompt: p,
+        messages: history,
+        currentHtml: html || undefined,
+        models: [BUILTIN_MODELS[0], BUILTIN_MODELS[1]],
+      })
+      if (!result.ok) {
+        setStatus({
+          kind: 'error',
+          text: result.message,
+        })
+        if (result.suggestByok) setShowByok(true)
+        setChat((prev) => [
+          ...prev,
+          { kind: 'assistant', id: nid('a'), text: result.message },
+        ])
+        return
+      }
+      setRaceCandidates(result.candidates)
+      setStatus({ kind: 'info', text: '请选择 Winner（无自动打分）' })
+    } catch (e) {
+      setStatus({
+        kind: 'error',
+        text: e instanceof Error ? e.message : String(e),
+      })
+    } finally {
+      setRacing(false)
+    }
+  }
+
+  const onPickWinner = (c: RaceCandidate & { ok: true }) => {
+    setRaceCandidates(null)
+    applySuccess(draft.trim() || prompt, c.html, c.mode, 'horse-race')
+    setDraft('')
+  }
+
+  const onCreateProject = async () => {
+    if (!signedIn) return
+    setCreating(true)
+    try {
+      const task = await createTask(email, '新项目')
+      await refreshTasks(email)
+      enterWorkspaceFresh({
+        guest: false,
+        taskId: task.id,
+        titleHint: '',
+      })
+      setStatus({ kind: 'info', text: '已新建项目，开始对话吧' })
+    } catch (e) {
+      setStatus({
+        kind: 'error',
+        text: e instanceof Error ? e.message : String(e),
+      })
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const onOpenProject = async (id: string) => {
+    if (!signedIn) return
+    try {
+      const task = await openTask(email, id)
+      enterWorkspaceFresh({
+        guest: false,
+        taskId: task.id,
+        existingHtml: task.html || undefined,
+        existingPrompt: task.prompt,
+        existingMode: task.generationMode,
+      })
+      if (task.prompt) setPrompt(task.prompt)
+      setStatus({ kind: 'info', text: `已打开项目：${task.title}` })
+    } catch (e) {
+      setStatus({
+        kind: 'error',
+        text: e instanceof Error ? e.message : String(e),
+      })
+    }
+  }
+
+  const onManualSave = async () => {
+    if (!signedIn || !activeTaskId || guestSession) {
+      setStatus({ kind: 'error', text: '访客无法保存，请先登录并打开项目' })
+      return
+    }
+    if (!html.trim()) {
+      setStatus({ kind: 'error', text: '没有可保存的预览内容' })
+      return
+    }
+    await autoSave(prompt, html, mode ?? 'builtin', lastSource)
+  }
 
   return (
-    <div className="app">
-      <header className="brand-bar">
-        <div>
-          <h1 className="brand">Mini Atoms</h1>
-          <p className="tagline">一句话 → 可交互 HTML → iframe 预览 → Task 持久化</p>
-        </div>
-        {mode ? (
-          <span className={`badge ${mode}`}>{MODE_LABEL[mode]}</span>
-        ) : null}
-      </header>
-
-      {!signedIn ? (
-        <div className="banner">
-          访客模式：可生成并 Preview，但不会持久化。登记邮箱后可新建 Task 保存回看。
-        </div>
+    <>
+      {view === 'home' ? (
+        <GuestHome
+          prompt={prompt}
+          onPromptChange={setPrompt}
+          streaming={streaming}
+          statusText={status.text}
+          statusError={status.kind === 'error'}
+          onGenerate={() => void onGuestGenerate()}
+          onLogin={() => {
+            setStatus({ kind: 'idle', text: '' })
+            setView('login')
+          }}
+          onLoadPreset={(path) => void loadPreset(path)}
+        />
       ) : null}
 
-      <div className="layout">
-        <aside className="panel sidebar">
-          <p className="section-title">身份</p>
-          <div className="field">
-            <label htmlFor="email">邮箱登记（无验证码）</label>
-            <input
-              id="email"
-              value={emailDraft}
-              onChange={(e) => setEmailDraft(e.target.value)}
-              placeholder="you@example.com"
-              disabled={signedIn}
-            />
-          </div>
-          <p className="hint warn">
-            冒充风险提示：任何人填入同一邮箱即视为该身份，MVP 不做验证码/OIDC。
-          </p>
-          <div className="row">
-            {!signedIn ? (
-              <button className="btn" type="button" onClick={onLogin}>
-                登录
-              </button>
-            ) : (
-              <button className="btn ghost" type="button" onClick={onLogout}>
-                退出（{email}）
-              </button>
-            )}
-          </div>
+      {view === 'login' ? (
+        <LoginView
+          emailDraft={emailDraft}
+          onEmailChange={setEmailDraft}
+          statusText={status.text}
+          statusError={status.kind === 'error'}
+          onSubmit={onLogin}
+          onBack={() => setView(signedIn ? 'projects' : 'home')}
+        />
+      ) : null}
 
-          {signedIn ? (
-            <>
-              <p className="section-title" style={{ marginTop: '1.2rem' }}>
-                我的 Task
-              </p>
-              <div className="row" style={{ marginBottom: '0.6rem' }}>
-                <button className="btn" type="button" onClick={() => void onCreateTask()}>
-                  新建 Task
-                </button>
-              </div>
-              {activeTask ? (
-                <p className="hint">当前：{activeTask.title}</p>
-              ) : (
-                <p className="hint warn">保存前须新建或打开 Task</p>
-              )}
-              <ul className="task-list">
-                {tasks.map((t) => (
-                  <li key={t.id}>
-                    <button
-                      type="button"
-                      className={t.id === activeTaskId ? 'active' : ''}
-                      onClick={() => void onOpenTask(t.id)}
-                    >
-                      {t.title || t.prompt.slice(0, 24) || t.id.slice(0, 8)}
-                      <span className="meta">{new Date(t.updatedAt).toLocaleString()}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </>
-          ) : null}
+      {view === 'projects' && signedIn ? (
+        <ProjectList
+          email={email}
+          tasks={tasks}
+          filter={filter}
+          onFilter={setFilter}
+          creating={creating}
+          onCreate={() => void onCreateProject()}
+          onOpen={(id) => void onOpenProject(id)}
+          onLogout={onLogout}
+          onOpenByok={() => setShowByok(true)}
+          statusText={status.text}
+          statusError={status.kind === 'error'}
+        />
+      ) : null}
 
-          <p className="section-title" style={{ marginTop: '1.2rem' }}>
-            生成
-          </p>
-          <div className="field">
-            <label htmlFor="prompt">Prompt</label>
-            <textarea
-              id="prompt"
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder="一句话描述你的想法"
-            />
-          </div>
-          <div className="field">
-            <label htmlFor="model">内置模型</label>
-            <select
-              id="model"
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              disabled={preferByok}
-            >
-              {BUILTIN_MODELS.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </select>
-          </div>
-          <label className="hint" style={{ display: 'flex', gap: '0.4rem' }}>
-            <input
-              type="checkbox"
-              checked={preferByok}
-              onChange={(e) => setPreferByok(e.target.checked)}
-              disabled={!byok}
-            />
-            使用浏览器自配模型
-          </label>
-          <div className="row" style={{ marginTop: '0.6rem' }}>
-            <button
-              className="btn"
-              type="button"
-              disabled={streaming}
-              onClick={() => void runGenerate()}
-            >
-              {html ? '重新生成' : '生成'}
-            </button>
-            <button
-              className="btn ghost"
-              type="button"
-              onClick={() => setShowByok(true)}
-            >
-              自配模型
-            </button>
-            {signedIn ? (
-              <button
-                className="btn warn"
-                type="button"
-                disabled={saving || !html}
-                onClick={() => void onSave()}
-              >
-                保存到 Task
-              </button>
-            ) : null}
-          </div>
-          <p className={`status-line ${status.kind === 'error' ? 'error' : ''}`}>
-            {status.text}
-          </p>
+      {view === 'workspace' ? (
+        <Workspace
+          title={activeTitle}
+          guest={guestSession || !signedIn}
+          chat={chat}
+          draft={draft}
+          onDraftChange={setDraft}
+          streaming={streaming}
+          saving={saving}
+          html={html}
+          mode={mode}
+          model={model}
+          onModelChange={setModel}
+          preferByok={preferByok}
+          onPreferByok={setPreferByok}
+          hasByok={Boolean(byok)}
+          pane={pane}
+          onPane={setPane}
+          statusText={status.text}
+          statusError={status.kind === 'error'}
+          raceCandidates={raceCandidates}
+          racing={racing}
+          onSend={() => void runGenerate(draft)}
+          onRace={() => void onRace()}
+          onPickWinner={onPickWinner}
+          onSave={() => void onManualSave()}
+          onBack={() => {
+            setRaceCandidates(null)
+            if (signedIn && !guestSession) setView('projects')
+            else setView('home')
+          }}
+          onOpenByok={() => setShowByok(true)}
+        />
+      ) : null}
 
-          <p className="section-title" style={{ marginTop: '1rem' }}>
-            预置示例（访客兜底）
-          </p>
-          <div className="chips">
-            {PRESETS.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                className="chip"
-                onClick={() => void loadPreset(p.path)}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-        </aside>
-
-        <section className="panel main preview-shell">
-          <div className="preview-toolbar">
-            <p className="section-title" style={{ margin: 0 }}>
-              Preview
-            </p>
-            <div className="row">
-              {mode ? (
-                <span className={`badge ${mode}`}>Generation Mode · {MODE_LABEL[mode]}</span>
-              ) : (
-                <span className="hint">等待生成…</span>
-              )}
-            </div>
-          </div>
-          <div className="iframe-wrap">
-            {/* sandbox：允许脚本/表单；尽量不 allow-same-origin */}
-            <iframe
-              title="preview"
-              sandbox="allow-scripts allow-forms"
-              srcDoc={html || emptyPreview}
-            />
-          </div>
-        </section>
-      </div>
-
-      {showByok ? (
+      {/* 自配弹窗：仅登录后打开（访客首页不展示入口） */}
+      {showByok && signedIn ? (
         <ByokModal
           initial={byok}
           onClose={() => setShowByok(false)}
@@ -476,7 +646,7 @@ export default function App() {
             setShowByok(false)
             setStatus({
               kind: 'info',
-              text: '自配已保存到本机 localStorage（不做服务端持久化）',
+              text: '自配已保存到本机 localStorage',
             })
           }}
           onClear={() => {
@@ -487,70 +657,6 @@ export default function App() {
           }}
         />
       ) : null}
-    </div>
-  )
-}
-
-const emptyPreview = `<!DOCTYPE html><html><body style="font-family:sans-serif;display:grid;place-items:center;height:100vh;margin:0;color:#64748b;background:#f8fafc"><p>在左侧输入 Prompt 后点击生成</p></body></html>`
-
-function ByokModal(props: {
-  initial: ByokConfig | null
-  onClose: () => void
-  onSave: (cfg: ByokConfig) => void
-  onClear: () => void
-}) {
-  const [baseUrl, setBaseUrl] = useState(
-    props.initial?.baseUrl || 'https://api.openai.com/v1',
-  )
-  const [apiKey, setApiKey] = useState(props.initial?.apiKey || '')
-  const [model, setModel] = useState(props.initial?.model || 'gpt-4o-mini')
-
-  return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true">
-      <div className="modal">
-        <h3>自配模型</h3>
-        <p className="hint warn">
-          出于安全考虑不做服务端持久化：API Key 仅保存在本机浏览器 localStorage。
-        </p>
-        <div className="field">
-          <label>Base URL</label>
-          <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
-        </div>
-        <div className="field">
-          <label>API Key</label>
-          <input
-            type="password"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            placeholder="不会上传到本应用服务端"
-          />
-        </div>
-        <div className="field">
-          <label>Model</label>
-          <input value={model} onChange={(e) => setModel(e.target.value)} />
-        </div>
-        <div className="row">
-          <button
-            className="btn"
-            type="button"
-            onClick={() =>
-              props.onSave({
-                baseUrl: baseUrl.trim(),
-                apiKey: apiKey.trim(),
-                model: model.trim(),
-              })
-            }
-          >
-            保存到本机
-          </button>
-          <button className="btn ghost" type="button" onClick={props.onClear}>
-            清除
-          </button>
-          <button className="btn ghost" type="button" onClick={props.onClose}>
-            关闭
-          </button>
-        </div>
-      </div>
-    </div>
+    </>
   )
 }

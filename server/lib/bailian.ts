@@ -16,12 +16,56 @@ export type StreamResult =
       status?: number
     }
 
-const SYSTEM_PROMPT = `你是一个单文件 HTML 生成器。根据用户一句话需求，输出一份可独立运行的完整 HTML 文档。
+/** 对话轮次（用于迭代摘要，role 仅 user/assistant） */
+export type ChatTurn = {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+const SYSTEM_PROMPT = `你是一个单文件 HTML 生成器。根据用户需求，输出一份可独立运行的完整 HTML 文档。
 要求：
 1. 只输出 HTML（可含内联 CSS/JS），不要 Markdown 代码围栏，不要解释。
 2. 样式与脚本必须自包含，无需外部资源（可用 CDN 字体也可，但优先内联）。
 3. 页面必须可交互（按钮、输入、动画等至少一种真实交互）。
-4. 视觉有明确风格，避免空白模板感。`
+4. 视觉有明确风格，避免空白模板感。
+5. 若提供了「当前 HTML」与历史对话，请在现有页面基础上按最新用户意图整页覆盖改写，输出完整新文档（不是补丁片段）。`
+
+/**
+ * 组装发给模型的 user 内容：可选历史摘要 + 当前 HTML + 本轮 Prompt
+ * 历史只取最近若干轮，避免上下文过长
+ */
+export function buildUserContent(options: {
+  prompt: string
+  messages?: ChatTurn[]
+  currentHtml?: string
+}): string {
+  const parts: string[] = []
+  const history = (options.messages ?? [])
+    .filter((m) => m.content?.trim())
+    .slice(-8)
+
+  if (history.length > 0) {
+    // 步骤：压缩对话历史为可读摘要，供模型理解迭代意图
+    const lines = history.map((m) => {
+      const tag = m.role === 'user' ? '用户' : '助手'
+      const text =
+        m.content.length > 400 ? `${m.content.slice(0, 400)}…` : m.content
+      return `- ${tag}: ${text}`
+    })
+    parts.push(`【对话历史摘要】\n${lines.join('\n')}`)
+  }
+
+  const html = options.currentHtml?.trim()
+  if (html) {
+    // 步骤：附带当前整页 HTML，要求整页覆盖生成
+    const clipped =
+      html.length > 24_000 ? `${html.slice(0, 24_000)}\n<!-- truncated -->` : html
+    parts.push(`【当前 HTML】\n${clipped}`)
+  }
+
+  parts.push(`【本轮需求】\n${options.prompt.trim()}`)
+  return parts.join('\n\n')
+}
 
 /** 从模型文本中剥离可能的 markdown 围栏，尽量得到纯 HTML */
 export function extractHtml(raw: string): string {
@@ -43,10 +87,15 @@ export async function streamBuiltinHtml(options: {
   prompt: string
   model: BuiltinModel
   apiKey: string
+  /** 可选：对话历史（摘要进 user 内容） */
+  messages?: ChatTurn[]
+  /** 可选：当前 Artifact HTML，用于整页覆盖迭代 */
+  currentHtml?: string
   onChunk?: (text: string) => void
   signal?: AbortSignal
 }): Promise<StreamResult> {
-  const { prompt, model, apiKey, onChunk, signal } = options
+  const { prompt, model, apiKey, messages, currentHtml, onChunk, signal } =
+    options
   // 调用方应已用 getBailianApiKey()；此处再防一手空 Key
   if (!apiKey.trim()) {
     return {
@@ -73,6 +122,9 @@ export async function streamBuiltinHtml(options: {
     idleTimer = setTimeout(() => controller.abort(), IDLE_TIMEOUT_MS)
   }
 
+  // 步骤：把历史与当前 HTML 拼进单条 user message，保持 chat/completions 兼容
+  const userContent = buildUserContent({ prompt, messages, currentHtml })
+
   try {
     const res = await fetch(`${BAILIAN_BASE_URL}/chat/completions`, {
       method: 'POST',
@@ -85,7 +137,7 @@ export async function streamBuiltinHtml(options: {
         stream: true,
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: prompt },
+          { role: 'user', content: userContent },
         ],
       }),
       signal: controller.signal,

@@ -1,4 +1,5 @@
 import { extractHtmlClient } from './html'
+import type { ChatTurn } from './api'
 import type { ByokConfig } from './types'
 import { BYOK_STORAGE_KEY } from './types'
 
@@ -23,6 +24,31 @@ export function clearByok() {
   localStorage.removeItem(BYOK_STORAGE_KEY)
 }
 
+/** 与服务端一致：拼装迭代上下文进单条 user 内容 */
+function buildByokUserContent(options: {
+  prompt: string
+  messages?: ChatTurn[]
+  currentHtml?: string
+}): string {
+  const parts: string[] = []
+  const history = (options.messages ?? []).slice(-8)
+  if (history.length) {
+    parts.push(
+      `【对话历史摘要】\n${history
+        .map((m) => `- ${m.role === 'user' ? '用户' : '助手'}: ${m.content.slice(0, 400)}`)
+        .join('\n')}`,
+    )
+  }
+  if (options.currentHtml?.trim()) {
+    const html = options.currentHtml
+    const clipped =
+      html.length > 24_000 ? `${html.slice(0, 24_000)}\n<!-- truncated -->` : html
+    parts.push(`【当前 HTML】\n${clipped}`)
+  }
+  parts.push(`【本轮需求】\n${options.prompt.trim()}`)
+  return parts.join('\n\n')
+}
+
 /**
  * 浏览器直连自配 OpenAI 兼容端点（流式）
  * Key 只在浏览器本地使用，不会发到本应用服务端
@@ -30,11 +56,15 @@ export function clearByok() {
 export async function streamByokHtml(options: {
   prompt: string
   config: ByokConfig
+  messages?: ChatTurn[]
+  currentHtml?: string
   onChunk?: (text: string) => void
   signal?: AbortSignal
 }): Promise<{ ok: true; html: string } | { ok: false; message: string }> {
-  const { prompt, config, onChunk, signal } = options
+  const { prompt, config, messages, currentHtml, onChunk, signal } = options
   const base = config.baseUrl.replace(/\/$/, '')
+  const userContent = buildByokUserContent({ prompt, messages, currentHtml })
+
   const res = await fetch(`${base}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -48,9 +78,9 @@ export async function streamByokHtml(options: {
         {
           role: 'system',
           content:
-            '你是单文件 HTML 生成器。只输出完整可交互 HTML，不要 Markdown 围栏与解释。样式脚本自包含。',
+            '你是单文件 HTML 生成器。只输出完整可交互 HTML，不要 Markdown 围栏与解释。样式脚本自包含。若提供当前 HTML，请整页覆盖改写。',
         },
-        { role: 'user', content: prompt },
+        { role: 'user', content: userContent },
       ],
     }),
     signal,

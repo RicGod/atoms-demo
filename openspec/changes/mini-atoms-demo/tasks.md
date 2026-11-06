@@ -31,7 +31,7 @@
 ## 4. Task 持久化（task-store）
 
 - [x] 4.1 接入 Turso，建表/迁移 Task（按邮箱隔离；覆盖写当前 Artifact）；验证可写入测试记录
-  - 未配 Turso 时降级内存存储；配齐 env 后走 libSQL
+  - 仅 Turso/libSQL；未配 env 时 Task API 失败（无内存降级）
 - [x] 4.2 实现 Task 新建、打开、列表、保存（覆盖）、详情 API；验证仅能见本邮箱 Task
 - [x] 4.3 前端接入 Task 列表与回看；验证刷新后仍能打开已存 Task
 - [x] 4.4 抽查持久化记录无密钥字段；验证访客无法保存

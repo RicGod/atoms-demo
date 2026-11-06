@@ -1,25 +1,30 @@
 # Mini Atoms Demo
 
-一句话 Prompt → 可交互单文件 HTML → iframe Preview →（登记邮箱后）Task 持久化回看。
+一句话 Prompt → 可交互单文件 HTML → iframe Preview →（登记邮箱后）项目（Task）持久化与对话迭代。已登录可赛马择优。
 
 OpenSpec change：`mini-atoms-demo`。
+
+**公网**：https://atoms-demo-7qi4.onrender.com/
 
 ## 与通过案例的差异
 
 | 点 | 通过案例（参考） | 本 Demo |
 | --- | --- | --- |
-| LLM Key | 浏览器 BYOK 为主 | **服务端内置**百炼 Key（本地 `aliQwen-api` / 兼容 `BAILIAN_API_KEY`）交卷；浏览器自配仅为降级 |
+| LLM Key | 浏览器 BYOK 为主 | **服务端内置**百炼 Key（本地 `aliQwen-api` / 兼容 `BAILIAN_API_KEY`）交卷；浏览器自配仅为降级（登录后可配） |
 | 身份 | 视对方实现 | 邮箱登记（无验证码 / 无 OIDC） |
-| 持久化 | 视对方实现 | **Turso**，按邮箱隔离的 Task；覆盖写当前 Artifact |
+| 持久化 | 视对方实现 | **Turso**，按邮箱隔离的 Task（对外称「项目」）；覆盖写当前 Artifact |
 | 生成角标 | — | **内置 / 自配 / mock** |
+| 迭代 | — | 多轮 Prompt + 历史摘要 + 当前 HTML → 整页覆盖 |
+| 赛马 | — | 仅登录；固定两路不同内置模型；人择 Winner；`source=horse-race` |
 
 ## 明确未做项
 
 - 分享直链（不做公开作品直链产品路径）
 - OIDC / 注册验证码
-- 完整版本树（Task 内覆盖写）
+- 完整版本树（「版本 N」仅装饰，不可回看；Task 内覆盖写）
 - Score / 自动裁判（Score 不进模型与持久化）
-- **赛马（Horse Race）**：本轮时间优先主闭环，赛马整段延后；见下文「剩余能力」
+- 真多文件工程 / 真文件树 / AST 补丁
+- 访客赛马
 
 ## 测试
 
@@ -33,7 +38,6 @@ npm test
 npm run test:e2e
 ```
 
-
 ## 本地启动
 
 ```bash
@@ -43,7 +47,7 @@ npm install
 # 2. 配置环境变量（可选；无 Key 时访客可走 mock/预置）
 cp .env.example .env.local
 # 本地百炼 Key：优先用系统/用户环境变量 aliQwen-api（已配置则无需写进 .env.local）
-# 亦可在 .env.local 写 BAILIAN_API_KEY；Turso 可选：TURSO_DATABASE_URL / TURSO_AUTH_TOKEN
+# 亦可在 .env.local 写 BAILIAN_API_KEY；Turso 必填：TURSO_DATABASE_URL / TURSO_AUTH_TOKEN
 
 # 3. 同时启动前端 + API
 npm run dev
@@ -71,8 +75,8 @@ npm run dev:web
 | --- | --- |
 | `aliQwen-api` | **本地优先**：系统/用户环境变量中的百炼 Key（含连字符）；服务端 `process.env['aliQwen-api']` |
 | `BAILIAN_API_KEY` | 兼容回退名；`.env.local` 与 **Render 推荐用此名**（平台变量名通常不允许连字符） |
-| `TURSO_DATABASE_URL` | Turso 数据库 URL；未配置则进程内内存存储 |
-| `TURSO_AUTH_TOKEN` | Turso Auth Token |
+| `TURSO_DATABASE_URL` | Turso 数据库 URL（必填；未配置则 Task API 失败） |
+| `TURSO_AUTH_TOKEN` | Turso Auth Token（必填） |
 | `API_PORT` | 本地 API 端口，默认 `3001` |
 | `PORT` | **Render 自动注入**的监听端口；生产启动优先读 `PORT`，勿在面板写死 |
 
@@ -102,26 +106,20 @@ npm run dev:web
    - **Start Command**：`npm start`
 4. 环境变量（Environment）必填 / 建议：
    - `BAILIAN_API_KEY`（**不要依赖** `aliQwen-api`：平台变量名通常不允许连字符）
-   - `TURSO_DATABASE_URL`、`TURSO_AUTH_TOKEN`（建议；未配则进程内内存，重启丢失）
+   - `TURSO_DATABASE_URL`、`TURSO_AUTH_TOKEN`（必填；未配则 Task 持久化失败）
    - `PORT` 由 Render 注入，**无需**也不应手工写死
    - `NODE_ENV=production`（Blueprint 已设）
 5. 部署后访问 `/api/health` 冒烟（`bailianConfigured: true` 表示 Key 已生效）
 
-> 本 README **不假装已部署成功**。公网 URL 需你在 Render 账号完成首次部署后回填到提交材料。
+当前公网 URL：https://atoms-demo-7qi4.onrender.com/
 
 **备选（Vercel）**：仍保留 `vercel.json` 与 `api/[[...path]].ts`，可按需 Import；主路径以 Render 为准。
 
-当前公网 URL：（部署后填写）
-
 ## 使用路径
 
-1. **访客**：输入 Prompt → 生成 → iframe 预览；失败/超时可 mock 或点预置示例；**不能保存**
-2. **已登录**：登记邮箱 → 新建/打开 Task → 生成 →「保存到 Task」覆盖写 → 刷新后从列表回看
-3. **交卷主路径**：配置真实百炼 Key（本地 `aliQwen-api` 或 `BAILIAN_API_KEY`；Render 用 `BAILIAN_API_KEY`）+（建议）Turso，走内置生成而非 mock
-
-## 剩余能力
-
-- Horse Race（并行两路 + 用户择优）：未实现；核心闭环优先。后续可按 `openspec/changes/mini-atoms-demo/specs/horse-race/spec.md` 补齐。
+1. **访客**：首页输入 Prompt → 生成 → 左对话 + 右预览/代码；失败/超时可 mock 或点预置示例；**不能保存、不能赛马**
+2. **已登录**：邮箱登录 → 项目列表 → 进入项目 → 多轮对话迭代（覆盖保存）→ 可选赛马择优（`horse-race`）
+3. **交卷主路径**：配置真实百炼 Key（本地 `aliQwen-api` 或 `BAILIAN_API_KEY`；Render 用 `BAILIAN_API_KEY`）+ Turso，走内置生成而非 mock
 
 ## 避坑对照
 
@@ -129,3 +127,4 @@ npm run dev:web
 - Key 不入库、不进 git
 - 真实交互（iframe + scripts）+ 登录后持久化
 - mock 是保险丝，不是交卷内容
+- 浅色仿 Atoms UI；对外文案「项目」= 对内 Task
