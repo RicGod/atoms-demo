@@ -15,11 +15,11 @@ export function ByokModal(props: {
   const [model, setModel] = useState(props.initial?.model || 'gpt-4o-mini')
 
   return (
-    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="自配模型">
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="配置模型">
       <div className="modal">
-        <h3>自配模型</h3>
+        <h3>配置模型</h3>
         <p className="hint warn">
-          出于安全考虑，API Key 只保存在本机浏览器，不会上传到服务器。
+          登录后需自行配置模型才能生成。API Key 只保存在本机浏览器，不会上传到服务器。
         </p>
         <div className="field">
           <label htmlFor="byok-base">Base URL</label>

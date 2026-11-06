@@ -314,6 +314,17 @@ export default function App() {
       return
     }
 
+    // 步骤：登录用户禁止走预置模型，必须自配；未配置则引导并阻断
+    const loggedInWorkspace = signedIn && !guestSession
+    if (loggedInWorkspace && !byok) {
+      setStatus({
+        kind: 'error',
+        text: '请先配置你的模型，配置完成后即可开始生成',
+      })
+      setShowByok(true)
+      return
+    }
+
     setStreaming(true)
     beginStreamUi()
     setRaceCandidates(null)
@@ -326,8 +337,8 @@ export default function App() {
     const currentHtml = html || undefined
 
     try {
-      // 步骤：登录用户可优先自配；访客走云端，失败则演示体验
-      if (signedIn && preferByok && byok) {
+      // 步骤：登录用户只走自配模型（BYOK）
+      if (loggedInWorkspace && byok) {
         setHtml('')
         const result = await streamByokHtml({
           prompt: p,
@@ -348,20 +359,20 @@ export default function App() {
         }
         setStatus({
           kind: 'error',
-          text: '自配模型暂时不可用，可检查配置后重试',
+          text: '模型暂时不可用，请检查配置后重试',
         })
         setChat((prev) => [
           ...prev,
           {
             kind: 'assistant',
             id: nid('a'),
-            text: '自配模型这边没跑通。检查一下密钥与地址，或先关掉「自配」用云端生成～',
+            text: '模型这边没跑通。请检查密钥、地址与模型名，保存后再试一次～',
           },
         ])
         return
       }
 
-      // 步骤：清空旧 HTML，让流式快照从空开始追加
+      // 步骤：访客走云端生成；失败则演示体验
       setHtml('')
       const result = await generateBuiltin({
         prompt: p,
@@ -383,23 +394,7 @@ export default function App() {
         return
       }
 
-      if (!signedIn || guestSession) {
-        await fallbackMock(result.message || 'generate-failed')
-      } else {
-        setStatus({
-          kind: 'error',
-          text: '生成没成功。可以重试、换模型，或打开自配模型。',
-        })
-        if (result.suggestByok) setShowByok(true)
-        setChat((prev) => [
-          ...prev,
-          {
-            kind: 'assistant',
-            id: nid('a'),
-            text: '这一轮没生成出来。再试一次，或换个模型说说看？',
-          },
-        ])
-      }
+      await fallbackMock(result.message || 'generate-failed')
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       if (!signedIn || guestSession) {
@@ -627,18 +622,31 @@ export default function App() {
     setDraft('')
   }
 
-  const onCreateProject = async () => {
+  /** 步骤：须带非空项目名称创建（弹窗已校验，此处再兜底） */
+  const onCreateProject = async (title: string) => {
     if (!signedIn) return
+    const name = title.trim()
+    if (!name) {
+      setStatus({ kind: 'error', text: '请填写项目名称' })
+      return
+    }
     setCreating(true)
     try {
-      const task = await createTask(email, '新项目')
+      const task = await createTask(email, name)
       await refreshTasks(email)
       enterWorkspaceFresh({
         guest: false,
         taskId: task.id,
         titleHint: '',
       })
-      setStatus({ kind: 'info', text: '已新建项目，开始对话吧' })
+      setStatus({
+        kind: 'info',
+        text: byok
+          ? '已新建项目，开始对话吧'
+          : '已新建项目。请先配置模型，再开始生成',
+      })
+      // 步骤：未配模型时顺手打开配置，降低卡顿感
+      if (!byok) setShowByok(true)
     } catch (e) {
       setStatus({
         kind: 'error',
@@ -720,7 +728,7 @@ export default function App() {
           filter={filter}
           onFilter={setFilter}
           creating={creating}
-          onCreate={() => void onCreateProject()}
+          onCreate={(title) => void onCreateProject(title)}
           onOpen={(id) => void onOpenProject(id)}
           onLogout={onLogout}
           onOpenByok={() => setShowByok(true)}
@@ -778,7 +786,7 @@ export default function App() {
             setShowByok(false)
             setStatus({
               kind: 'info',
-              text: '自配已保存在本机浏览器',
+              text: '模型已保存在本机浏览器，可以开始生成了',
             })
           }}
           onClear={() => {
@@ -786,6 +794,10 @@ export default function App() {
             setByok(null)
             setPreferByok(false)
             setShowByok(false)
+            setStatus({
+              kind: 'info',
+              text: '已清除本机模型配置。登录后需重新配置才能生成',
+            })
           }}
         />
       ) : null}

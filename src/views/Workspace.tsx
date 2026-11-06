@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import { BUILTIN_MODELS } from '../../shared/constants'
 import type { ChatTurn, RaceCandidate } from '../lib/api'
 import { modeBadgeLabel } from '../lib/labels'
 import type { GenerationMode } from '../lib/types'
@@ -11,7 +10,7 @@ export type ChatItem =
 
 type Pane = 'preview' | 'code'
 
-/** 图3：左对话 + 右预览/代码；单文件 index.html；版本 N 仅装饰 */
+/** 图3：左对话 + 右预览/代码；大气圆角输入卡；登录用户仅自配模型 */
 export function Workspace(props: {
   title: string
   guest: boolean
@@ -26,6 +25,7 @@ export function Workspace(props: {
   saving: boolean
   html: string
   mode: GenerationMode | null
+  /** 访客可选模型；登录用户忽略（仅自配） */
   model: string
   onModelChange: (m: string) => void
   preferByok: boolean
@@ -75,6 +75,11 @@ export function Workspace(props: {
   const hasThinkBody = Boolean(
     props.streamThinking.trim() || props.streamStage.trim(),
   )
+
+  // 步骤：登录用户未配置模型时禁止发送；访客不受限
+  const needsModelSetup = !props.guest && !props.hasByok
+  const sendBlocked =
+    props.streaming || props.racing || needsModelSetup || !props.draft.trim()
 
   return (
     <div className="shell workspace-shell">
@@ -145,8 +150,9 @@ export function Workspace(props: {
             </div>
           ) : null}
 
+          {/* 赛马候选面板：逻辑保留；入口已隐藏，正常不会触发 */}
           {props.raceCandidates ? (
-            <div className="race-panel" role="group" aria-label="赛马候选">
+            <div className="race-panel" role="group" aria-label="赛马候选" hidden>
               <p className="section-label">赛马候选 · 请择优（无自动打分）</p>
               <div className="race-grid">
                 {props.raceCandidates.map((c) => (
@@ -180,32 +186,17 @@ export function Workspace(props: {
           ) : null}
         </div>
 
+        {/* 步骤：大气圆角输入卡（多行 + 底栏 + 圆形发送） */}
         <div className="chat-composer">
-          {!props.guest ? (
-            <div className="composer-tools">
-              <label className="field-inline">
-                <span className="sr-only">内置模型</span>
-                <select
-                  value={props.model}
-                  onChange={(e) => props.onModelChange(e.target.value)}
-                  disabled={props.preferByok}
-                >
-                  {BUILTIN_MODELS.map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="hint check">
-                <input
-                  type="checkbox"
-                  checked={props.preferByok}
-                  disabled={!props.hasByok}
-                  onChange={(e) => props.onPreferByok(e.target.checked)}
-                />
-                自配
-              </label>
+          {/* 登录未配模型：产品化引导，禁用生成 */}
+          {needsModelSetup ? (
+            <div className="composer-gate" role="status">
+              <p>
+                登录后请先配置你自己的模型，配置完成后即可开始对话生成。
+              </p>
+              <button className="btn sm" type="button" onClick={props.onOpenByok}>
+                去配置模型
+              </button>
             </div>
           ) : null}
 
@@ -215,7 +206,7 @@ export function Workspace(props: {
                 key={s}
                 type="button"
                 className="chip"
-                disabled={props.streaming || props.racing}
+                disabled={props.streaming || props.racing || needsModelSetup}
                 onClick={() => props.onDraftChange(s)}
               >
                 {s}
@@ -223,61 +214,75 @@ export function Workspace(props: {
             ))}
           </div>
 
-          <div className="composer-row">
-            <input
-              className="composer-input"
+          <div className="composer-card">
+            <label className="sr-only" htmlFor="composer-textarea">
+              描述你的想法
+            </label>
+            <textarea
+              id="composer-textarea"
+              className="composer-textarea"
+              rows={3}
               value={props.draft}
               onChange={(e) => props.onDraftChange(e.target.value)}
               placeholder="让智能体团队实现你的想法"
-              disabled={props.streaming || props.racing}
+              disabled={props.streaming || props.racing || needsModelSetup}
               onKeyDown={(e) => {
+                // 步骤：Enter 发送，Shift+Enter 换行
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault()
-                  props.onSend()
+                  if (!sendBlocked) props.onSend()
                 }
               }}
             />
-            <button
-              className="btn"
-              type="button"
-              disabled={props.streaming || props.racing}
-              onClick={props.onSend}
-            >
-              发送
-            </button>
+            <div className="composer-toolbar">
+              <div className="composer-toolbar-left">
+                {!props.guest ? (
+                  <button
+                    className="btn ghost sm"
+                    type="button"
+                    disabled={props.saving || !props.html || needsModelSetup}
+                    onClick={props.onSave}
+                  >
+                    {props.saving ? '保存中…' : '保存'}
+                  </button>
+                ) : (
+                  <span className="hint">访客模式 · 登录后可保存项目</span>
+                )}
+                {modeBadgeLabel(props.mode) ? (
+                  <span className={`badge ${props.mode ?? ''}`}>
+                    {modeBadgeLabel(props.mode)}
+                  </span>
+                ) : null}
+                {/* 赛马入口：功能暂隐，逻辑保留在 App（onRace 仍传入） */}
+                {false ? (
+                  <button
+                    className="btn ghost sm"
+                    type="button"
+                    disabled={props.streaming || props.racing}
+                    onClick={props.onRace}
+                  >
+                    {props.racing ? '赛马中…' : '赛马（两路）'}
+                  </button>
+                ) : null}
+              </div>
+              <button
+                className="composer-send"
+                type="button"
+                aria-label="发送"
+                disabled={sendBlocked}
+                onClick={props.onSend}
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+                  {/* 步骤：向上箭头，匹配参考图圆形发送 */}
+                  <path
+                    fill="currentColor"
+                    d="M12 4.5l7 7-1.4 1.4L13 8.3V19.5h-2V8.3L6.4 12.9 5 11.5l7-7z"
+                  />
+                </svg>
+              </button>
+            </div>
           </div>
 
-          <div className="row composer-extra">
-            {!props.guest ? (
-              <>
-                <button
-                  className="btn ghost sm"
-                  type="button"
-                  disabled={props.streaming || props.racing}
-                  onClick={props.onRace}
-                >
-                  {props.racing ? '赛马中…' : '赛马（两路）'}
-                </button>
-                <button
-                  className="btn warn sm"
-                  type="button"
-                  disabled={props.saving || !props.html}
-                  onClick={props.onSave}
-                >
-                  {props.saving ? '保存中…' : '保存到项目'}
-                </button>
-              </>
-            ) : (
-              // 步骤：访客工作区轻提示；登录后可保存项目与持续对话
-              // 注意：三元 else 分支只能有一个表达式；勿用 {/* */} 与元素并列（会解析失败）
-              <span className="hint">当前为访客模式 · 登录后解锁更多功能</span>
-            )}
-            {modeBadgeLabel(props.mode) ? (
-              <span className={`badge ${props.mode ?? ''}`}>
-                {modeBadgeLabel(props.mode)}
-              </span>
-            ) : null}
-          </div>
           <p className={`status-line ${props.statusError ? 'error' : ''}`}>
             {props.statusText}
           </p>
