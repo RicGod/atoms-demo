@@ -2,16 +2,19 @@ import { useState } from 'react'
 import { AtomsMark } from '../components/AtomsMark'
 import type { TaskSummary } from '../lib/types'
 
-/** 登录后项目列表：窄侧栏 + 主区卡片；新建须填写项目名称 */
+/** 登录后项目列表：紧凑侧栏导航 + 主区卡片；支持删除 */
 export function ProjectList(props: {
   email: string
   tasks: TaskSummary[]
   filter: 'all' | 'fav'
   onFilter: (f: 'all' | 'fav') => void
   creating: boolean
+  deletingId: string | null
   /** 步骤：带名称创建，空名称由本组件拦截 */
   onCreate: (title: string) => void
   onOpen: (id: string) => void
+  /** 步骤：删除项目（需二次确认） */
+  onDelete: (id: string) => void
   onLogout: () => void
   onOpenByok: () => void
   statusText: string
@@ -23,6 +26,8 @@ export function ProjectList(props: {
   const [showCreate, setShowCreate] = useState(false)
   const [nameDraft, setNameDraft] = useState('')
   const [nameError, setNameError] = useState('')
+  // 步骤：删除确认目标
+  const [pendingDelete, setPendingDelete] = useState<TaskSummary | null>(null)
 
   const openCreate = () => {
     setNameDraft('')
@@ -52,8 +57,8 @@ export function ProjectList(props: {
         <p className="workspace-pill" title={props.email}>
           {props.email}
         </p>
-        <nav className="side-nav">
-          {/* 共识：侧栏只保留项目 */}
+        {/* 步骤：导航贴顶、条目等高，不占满侧栏剩余高度（对齐参考图） */}
+        <nav className="side-nav" aria-label="功能">
           <button type="button" className="nav-item active" aria-current="page">
             <svg
               className="nav-ico"
@@ -130,7 +135,7 @@ export function ProjectList(props: {
           ) : (
             <ul className="project-grid">
               {visible.map((t) => (
-                <li key={t.id}>
+                <li key={t.id} className="project-tile">
                   <button
                     type="button"
                     className="project-card"
@@ -149,6 +154,19 @@ export function ProjectList(props: {
                         {new Date(t.updatedAt).toLocaleDateString('zh-CN')}
                       </time>
                     </div>
+                  </button>
+                  {/* 步骤：删除与打开分离，避免误触 */}
+                  <button
+                    type="button"
+                    className="project-delete"
+                    aria-label={`删除 ${t.title || '项目'}`}
+                    disabled={props.deletingId === t.id}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setPendingDelete(t)
+                    }}
+                  >
+                    {props.deletingId === t.id ? '…' : '删除'}
                   </button>
                 </li>
               ))}
@@ -203,6 +221,49 @@ export function ProjectList(props: {
                 type="button"
                 disabled={props.creating}
                 onClick={() => setShowCreate(false)}
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {/* 步骤：删除二次确认 */}
+      {pendingDelete ? (
+        <div
+          className="modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-label="删除项目"
+        >
+          <div className="modal">
+            <h3>删除项目</h3>
+            <p className="hint">
+              确定删除「
+              {pendingDelete.title ||
+                pendingDelete.prompt.slice(0, 24) ||
+                '未命名项目'}
+              」？此操作不可恢复。
+            </p>
+            <div className="row">
+              <button
+                className="btn danger"
+                type="button"
+                disabled={props.deletingId === pendingDelete.id}
+                onClick={() => {
+                  const id = pendingDelete.id
+                  setPendingDelete(null)
+                  props.onDelete(id)
+                }}
+              >
+                {props.deletingId === pendingDelete.id ? '删除中…' : '确认删除'}
+              </button>
+              <button
+                className="btn ghost"
+                type="button"
+                disabled={Boolean(props.deletingId)}
+                onClick={() => setPendingDelete(null)}
               >
                 取消
               </button>

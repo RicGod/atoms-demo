@@ -42,6 +42,21 @@
 - **WHEN** 用户在已打开的 Task 中生成成功并确认保存
 - **THEN** Task 内仅保留当前选定的一份 Artifact（覆盖写），Preview 与之一致
 
+### Requirement: Iteration presentation may show a non-persistent diff
+当工作区已有当前 Artifact 且用户发起对话式迭代时，系统 MAY 在生成过程中于代码区保留上一版全文（避免整页流式重刷）；成功后 SHALL 用新 Artifact 更新 Preview，并默认展示预览。代码视图 MAY 提供相对上一版的行级变更对照。该 Diff **MUST NOT** 作为持久化实体写入 Task；重新打开 Task 时只恢复最终 Artifact 与对话时间线。
+
+#### Scenario: Iteration keeps previous code while generating
+- **WHEN** 用户在已有预览 HTML 的项目中再次发送优化类 Prompt 且生成进行中
+- **THEN** 代码区不因流式输出而清空并整页重写上一版内容（MAY 显示修改中状态）
+
+#### Scenario: Iteration success defaults to preview
+- **WHEN** 迭代生成成功并更新当前 Artifact
+- **THEN** 界面默认回到 Preview；用户可切换到代码视图查看可选的变更对照
+
+#### Scenario: Diff is not reopened from storage
+- **WHEN** 用户关闭后再次打开同一 Task
+- **THEN** 系统恢复最终 HTML 与对话时间线，MUST NOT 要求恢复上一次的 Diff 视图为持久状态
+
 ### Requirement: Email registration is login
 系统 SHALL 将「登录」实现为提交邮箱登记（无验证码、无 OIDC）；UI MAY 提示冒充风险。本机 MAY 用 `localStorage` 最多记住上次邮箱。
 

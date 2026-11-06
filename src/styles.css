@@ -157,6 +157,20 @@ select:focus-visible,
   font-size: 0.86rem;
 }
 
+.btn.danger {
+  background: #be123c;
+  color: #fff;
+  border-color: #be123c;
+}
+
+.btn.danger:hover:not(:disabled) {
+  background: #9f1239;
+}
+
+.danger-text {
+  color: #9f1239 !important;
+}
+
 .btn.block {
   width: 100%;
   margin-bottom: 0.4rem;
@@ -535,8 +549,8 @@ select:focus-visible,
 /* —— 项目列表（图1）：窄侧栏 + 主区留白 —— */
 .app-shell {
   display: grid;
-  /* 步骤：侧栏收窄，避免占满/撑死整屏 */
-  grid-template-columns: 168px minmax(0, 1fr);
+  /* 步骤：栅格列宽与侧栏一致，避免菜单文字被裁切 */
+  grid-template-columns: 220px minmax(0, 1fr);
   min-height: 100vh;
 }
 
@@ -547,8 +561,12 @@ select:focus-visible,
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  /* 步骤：勿 min-width:0 + 固定宽冲突导致「配置模型/退出」被裁 */
   min-width: 0;
-  max-width: 168px;
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+  overflow: visible;
 }
 
 .sidebar-brand {
@@ -570,9 +588,12 @@ select:focus-visible,
 }
 
 .side-nav {
-  display: grid;
-  gap: 0.25rem;
-  flex: 1;
+  /* 步骤：条目贴顶、内容高度自适应，勿 flex:1 撑满侧栏 */
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.2rem;
+  flex: 0 0 auto;
 }
 
 .nav-item {
@@ -582,10 +603,18 @@ select:focus-visible,
   border: 0;
   background: transparent;
   text-align: left;
-  padding: 0.55rem 0.7rem;
+  /* 步骤：等高紧凑行，对齐参考图导航项 */
+  padding: 0.45rem 0.65rem;
   border-radius: 10px;
   color: var(--text);
   font-weight: 500;
+  font-size: 0.92rem;
+  line-height: 1.2;
+  width: 100%;
+}
+
+.nav-item:hover {
+  background: rgba(0, 0, 0, 0.04);
 }
 
 .nav-item.active {
@@ -599,6 +628,16 @@ select:focus-visible,
 
 .sidebar-foot {
   margin-top: auto;
+}
+
+.sidebar-foot .btn.block {
+  /* 步骤：侧栏按钮完整展示文案，不截断 */
+  white-space: nowrap;
+  overflow: visible;
+  text-overflow: clip;
+  font-size: 0.86rem;
+  padding-left: 0.55rem;
+  padding-right: 0.55rem;
 }
 
 .app-main {
@@ -639,6 +678,10 @@ select:focus-visible,
   gap: 1.1rem;
 }
 
+.project-tile {
+  position: relative;
+}
+
 .project-card {
   width: 100%;
   border: 1px solid var(--border);
@@ -654,6 +697,30 @@ select:focus-visible,
 .project-card:hover {
   border-color: #c5cae8;
   transform: translateY(-1px);
+}
+
+/* 步骤：卡片角上删除，不抢主点击区 */
+.project-delete {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 1;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.92);
+  color: #9f1239;
+  border-radius: 8px;
+  padding: 0.25rem 0.55rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.project-delete:hover:not(:disabled) {
+  background: #fff1f2;
+  border-color: #fecdd3;
+}
+
+.project-delete:disabled {
+  opacity: 0.6;
 }
 
 .project-thumb {
@@ -694,11 +761,49 @@ select:focus-visible,
 /* —— 工作区（图3） —— */
 .workspace-shell {
   display: grid;
-  /* 步骤：对话列略加宽，容纳大气输入卡 */
-  grid-template-columns: minmax(340px, 420px) 1fr;
+  /* 步骤：对话列宽由 --chat-pane-width 控制，中间为可拖拽分隔条 */
+  grid-template-columns: var(--chat-pane-width, 380px) 6px 1fr;
   height: 100vh;
   overflow: hidden;
   background: var(--bg);
+}
+
+/* 步骤：对话区左右拉伸手柄 */
+.chat-resize-handle {
+  position: relative;
+  z-index: 4;
+  cursor: col-resize;
+  touch-action: none;
+  background: transparent;
+  outline: none;
+}
+
+.chat-resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: var(--border);
+  transition: background 160ms ease, width 160ms ease;
+}
+
+.chat-resize-handle:hover::after,
+.chat-resize-handle:focus-visible::after,
+body.is-resizing-chat .chat-resize-handle::after {
+  width: 2px;
+  background: var(--accent);
+}
+
+body.is-resizing-chat {
+  cursor: col-resize;
+  user-select: none;
+}
+
+body.is-resizing-chat iframe {
+  pointer-events: none;
 }
 
 .chat-pane {
@@ -736,25 +841,46 @@ select:focus-visible,
 }
 
 .chat-scroll {
-  overflow: auto;
+  /* 步骤：grid 子项必须 min-height:0，否则流式变高时会把格子撑开、结束后才出现滚动条 */
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
   padding: var(--space-4);
   display: flex;
   flex-direction: column;
   gap: 0.65rem;
   scroll-padding-bottom: 1rem;
+  /* 步骤：关闭滚动锚定，避免底部追加思考面板时浏览器“钉住旧内容”导致新块在视口外 */
+  overflow-anchor: none;
 }
 
 .chat-empty {
   margin: 1rem 0;
 }
 
+/* 步骤：零高度锚点，供对话区滚底定位 */
+.chat-scroll-anchor {
+  width: 100%;
+  height: 1px;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
 .bubble {
+  /* 步骤：横向可断行；纵向禁止被 flex 压扁（占满时否则报错气泡会被裁切） */
+  min-width: 0;
+  min-height: min-content;
+  flex-shrink: 0;
   max-width: 92%;
+  box-sizing: border-box;
   padding: 0.65rem 0.85rem;
   border-radius: 12px;
   font-size: 0.92rem;
   line-height: 1.45;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .bubble.user {
@@ -773,9 +899,23 @@ select:focus-visible,
   color: var(--muted);
 }
 
-/* 流式思考面板 */
+/* 步骤：对话内报错气泡（替代输入框下方 status-line.error） */
+.bubble.error {
+  align-self: stretch;
+  max-width: 100%;
+  width: 100%;
+  /* 步骤：勿用 overflow:hidden——flex 列占满时会按可压缩项裁切，报错只露出一截 */
+  overflow: visible;
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+
+/* 流式思考面板（对话滚动流内） */
 .stream-panel {
   align-self: stretch;
+  flex-shrink: 0;
+  width: 100%;
   border: 1px solid var(--border);
   border-radius: 12px;
   background:
@@ -816,6 +956,37 @@ select:focus-visible,
   margin: 0.55rem 0 0.35rem;
   font-size: 0.86rem;
   color: var(--text);
+}
+
+/* 步骤：动态省略号，三颗点依次点亮，避免静态「…」像卡死 */
+.ellipsis-dots {
+  display: inline-flex;
+  margin-left: 0.05em;
+  letter-spacing: 0.02em;
+}
+
+.ellipsis-dots span {
+  opacity: 0.2;
+  animation: ellipsis-dot 1.2s ease-in-out infinite;
+}
+
+.ellipsis-dots span:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.ellipsis-dots span:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes ellipsis-dot {
+  0%,
+  80%,
+  100% {
+    opacity: 0.2;
+  }
+  40% {
+    opacity: 1;
+  }
 }
 
 .stream-thinking {
@@ -865,6 +1036,7 @@ select:focus-visible,
 
 .version-card {
   align-self: stretch;
+  flex-shrink: 0;
   border: 1px solid var(--border);
   background: linear-gradient(135deg, #f8fafc, #ecfeff);
   border-radius: 12px;
@@ -885,6 +1057,25 @@ select:focus-visible,
   margin: 0;
   font-size: 0.88rem;
   color: var(--text);
+}
+
+/* 步骤：工作区模型下拉 */
+.model-select-row {
+  margin-bottom: 0.55rem;
+}
+
+.model-select {
+  width: 100%;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 0.4rem 0.65rem;
+  font-size: 0.88rem;
+}
+
+.model-select:disabled {
+  opacity: 0.5;
 }
 
 .chat-composer {
@@ -1093,6 +1284,56 @@ select:focus-visible,
   min-height: 0;
 }
 
+/* 步骤：右侧预览/代码容器；迭代时可叠「修改中」遮罩 */
+.stage-surface {
+  position: relative;
+  min-height: 0;
+  min-width: 0;
+  height: 100%;
+  display: grid;
+  grid-template-rows: 1fr;
+}
+
+.stage-surface > .stage-body {
+  min-height: 0;
+  height: 100%;
+}
+
+.mutating-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      180deg,
+      rgba(248, 250, 252, 0.55) 0%,
+      rgba(241, 245, 249, 0.72) 100%
+    );
+  backdrop-filter: blur(0.5px);
+}
+
+.mutating-overlay .stream-stage {
+  margin: 0;
+  padding: 0.45rem 0.85rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--border);
+  box-shadow: 0 6px 20px rgba(15, 23, 42, 0.06);
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.stage-surface.is-mutating .code-view,
+.stage-surface.is-mutating .iframe-wrap {
+  filter: saturate(0.92);
+}
+
 .iframe-wrap {
   background: #fff;
   height: 100%;
@@ -1126,6 +1367,36 @@ select:focus-visible,
   word-break: break-word;
 }
 
+/* 步骤：迭代后的行 diff，突出增删、弱化未改 */
+.code-diff .diff-line {
+  display: block;
+  padding: 0 0.15rem;
+  border-radius: 2px;
+}
+
+.code-diff .diff-add {
+  background: rgba(16, 185, 129, 0.14);
+  color: #065f46;
+}
+
+.code-diff .diff-del {
+  background: rgba(244, 63, 94, 0.12);
+  color: #9f1239;
+  text-decoration: line-through;
+  text-decoration-color: rgba(159, 18, 57, 0.35);
+}
+
+.code-diff .diff-same {
+  color: #64748b;
+}
+
+.code-diff .diff-skip {
+  color: var(--muted);
+  font-style: italic;
+  margin: 0.35rem 0;
+  background: rgba(148, 163, 184, 0.12);
+}
+
 /* —— 弹窗 —— */
 .modal-backdrop {
   position: fixed;
@@ -1151,6 +1422,286 @@ select:focus-visible,
   font-size: 1.25rem;
 }
 
+/* —— 模型配置弹窗 —— */
+.byok-modal {
+  width: min(520px, 100%);
+  max-height: min(88vh, 760px);
+  overflow: auto;
+  padding: 0;
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  box-shadow:
+    0 24px 48px rgba(15, 23, 42, 0.14),
+    0 0 0 1px rgba(15, 23, 42, 0.04);
+}
+
+.byok-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 1.15rem 1.2rem 0.9rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.byok-head h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+  letter-spacing: -0.02em;
+}
+
+.byok-sub {
+  margin: 0.3rem 0 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.byok-list,
+.byok-form {
+  padding: 0.85rem 1.2rem;
+}
+
+.byok-form {
+  border-top: 1px solid var(--border);
+  background: rgba(248, 250, 252, 0.7);
+}
+
+.byok-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.55rem;
+}
+
+.byok-section-head .section-label {
+  margin: 0;
+}
+
+.byok-count {
+  min-width: 1.35rem;
+  height: 1.35rem;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: var(--text);
+  font-size: 0.72rem;
+  font-weight: 700;
+  display: inline-grid;
+  place-items: center;
+}
+
+.byok-empty {
+  border: 1px dashed var(--border-strong);
+  border-radius: 12px;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.byok-empty p {
+  margin: 0;
+  font-size: 0.86rem;
+  color: var(--muted);
+}
+
+.byok-profiles {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.byok-row {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fff;
+  padding: 0.25rem 0.3rem 0.25rem 0.2rem;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.byok-row:hover {
+  border-color: var(--border-strong);
+}
+
+.byok-row.active {
+  border-color: rgba(14, 116, 144, 0.4);
+  background: var(--accent-soft);
+}
+
+.byok-pick {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 0.4rem 0.45rem;
+  min-width: 0;
+}
+
+.byok-radio {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid #94a3b8;
+  flex-shrink: 0;
+}
+
+.byok-row.active .byok-radio {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 3px var(--accent);
+}
+
+.byok-meta {
+  display: grid;
+  gap: 0.08rem;
+  min-width: 0;
+}
+
+.byok-meta strong {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.byok-meta .hint {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+
+.byok-sep {
+  margin: 0 0.28rem;
+  opacity: 0.5;
+}
+
+.byok-badge {
+  margin-left: auto;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--accent-hover);
+  background: rgba(14, 116, 144, 0.12);
+  border-radius: 999px;
+  padding: 0.12rem 0.42rem;
+  flex-shrink: 0;
+}
+
+.byok-badge.muted {
+  color: var(--muted);
+  background: #e2e8f0;
+  font-weight: 600;
+}
+
+.byok-row.builtin {
+  background: #f8fafc;
+}
+
+.byok-locked-hint {
+  padding: 0 0.35rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.byok-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+  padding-right: 0.15rem;
+}
+
+.icon-btn {
+  width: 32px;
+  height: 32px;
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  padding: 0;
+  flex-shrink: 0;
+  transition: background 140ms ease, color 140ms ease;
+}
+
+.icon-btn:hover:not(:disabled) {
+  background: rgba(15, 23, 42, 0.06);
+  color: var(--text);
+}
+
+.icon-btn.danger:hover:not(:disabled) {
+  background: #fff1f2;
+  color: var(--danger);
+}
+
+.icon-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.byok-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.65rem 0.75rem;
+}
+
+.byok-span-2 {
+  grid-column: 1 / -1;
+}
+
+.byok-key-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.byok-key-wrap input {
+  flex: 1;
+  min-width: 0;
+}
+
+.byok-eye {
+  margin-top: 0;
+}
+
+.byok-form-actions {
+  margin-top: 0.85rem;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.byok-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 6.5rem;
+  justify-content: center;
+}
+
+.byok-foot {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.65rem 1.1rem 0.95rem;
+  border-top: 1px solid var(--border);
+}
+
+@media (max-width: 520px) {
+  .byok-fields {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 900px) {
   .app-shell {
     grid-template-columns: 1fr;
@@ -1166,7 +1717,12 @@ select:focus-visible,
   }
 
   .side-nav {
-    flex: 1;
+    flex: 0 0 auto;
+  }
+
+  .app-sidebar {
+    width: auto;
+    max-width: none;
   }
 
   .sidebar-foot {
@@ -1184,6 +1740,11 @@ select:focus-visible,
     grid-template-columns: 1fr;
     height: auto;
     min-height: 100vh;
+  }
+
+  /* 步骤：窄屏纵向堆叠，隐藏左右拖宽手柄 */
+  .chat-resize-handle {
+    display: none;
   }
 
   .chat-pane {

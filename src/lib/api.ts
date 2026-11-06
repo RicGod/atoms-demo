@@ -1,4 +1,9 @@
-import type { GenerationMode, TaskDetail, TaskSummary } from './types'
+import type {
+  GenerationMode,
+  PersistedChatItem,
+  TaskDetail,
+  TaskSummary,
+} from './types'
 
 export type ChatTurn = { role: 'user' | 'assistant'; content: string }
 
@@ -242,6 +247,8 @@ export async function saveTask(input: {
   generationMode: GenerationMode
   source?: 'single' | 'horse-race'
   title?: string
+  /** 步骤：与 HTML 一并覆盖保存的对话时间线 */
+  chat?: PersistedChatItem[]
 }) {
   const res = await fetch(`/api/tasks/${encodeURIComponent(input.id)}`, {
     method: 'PUT',
@@ -255,4 +262,14 @@ export async function saveTask(input: {
   }
   if (!json.ok || !json.task) throw new Error(json.error || '保存失败')
   return json.task
+}
+
+/** 删除项目；邮箱隔离由服务端校验 */
+export async function deleteTask(email: string, id: string) {
+  const res = await fetch(
+    `/api/tasks/${encodeURIComponent(id)}?email=${encodeURIComponent(email)}`,
+    { method: 'DELETE' },
+  )
+  const json = (await res.json()) as { ok: boolean; error?: string }
+  if (!json.ok) throw new Error(json.error || '删除失败')
 }

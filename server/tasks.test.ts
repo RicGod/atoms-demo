@@ -19,7 +19,7 @@ describe('tasks API（libSQL）', () => {
     resetTasksClientForTests()
   })
 
-  it('无邮箱时 create / save / list / get 均 403', async () => {
+  it('无邮箱时 create / save / list / get / delete 均 403', async () => {
     const app = createApp()
 
     const createRes = await request(app).post('/api/tasks').send({})
@@ -35,6 +35,9 @@ describe('tasks API（libSQL）', () => {
 
     const getRes = await request(app).get('/api/tasks/any-id')
     expect(getRes.status).toBe(403)
+
+    const delRes = await request(app).delete('/api/tasks/any-id')
+    expect(delRes.status).toBe(403)
   })
 
   it('未配置 Turso 时 Task 写操作失败', async () => {
@@ -89,6 +92,45 @@ describe('tasks API（libSQL）', () => {
       .query({ email })
     expect(got.status).toBe(200)
     expect(got.body.task.html).toContain('<body>hi</body>')
+    expect(got.body.task.chat).toEqual([])
+  })
+
+  it('保存并可回读对话记录', async () => {
+    const app = createApp()
+    const email = 'chat@example.com'
+
+    const created = await request(app)
+      .post('/api/tasks')
+      .send({ email, title: '对话项目' })
+    const id = created.body.task.id as string
+
+    const chat = [
+      { kind: 'user', id: 'u1', text: '做一个计数器' },
+      { kind: 'assistant', id: 'a1', text: '好的，已生成' },
+      { kind: 'version', id: 'v1', n: 1, label: '本轮生成完成' },
+    ]
+
+    const saved = await request(app)
+      .put(`/api/tasks/${id}`)
+      .send({
+        email,
+        prompt: '做一个计数器',
+        html: '<!DOCTYPE html><html><body>1</body></html>',
+        generationMode: 'byok',
+        source: 'single',
+        chat,
+      })
+    expect(saved.status).toBe(200)
+    expect(saved.body.task.chat).toHaveLength(3)
+    expect(saved.body.task.chat[0].text).toBe('做一个计数器')
+
+    const got = await request(app).get(`/api/tasks/${id}`).query({ email })
+    expect(got.status).toBe(200)
+    expect(got.body.task.chat).toEqual(chat)
+
+    // 列表不回完整 chat
+    const listed = await request(app).get('/api/tasks').query({ email })
+    expect(listed.body.tasks[0]).not.toHaveProperty('chat')
   })
 
   it('按邮箱隔离：A 不可见 B 的任务', async () => {
@@ -117,5 +159,33 @@ describe('tasks API（libSQL）', () => {
       .get(`/api/tasks/${aId}`)
       .query({ email: 'b@ex.com' })
     expect(bGet.status).toBe(404)
+
+    // 步骤：B 也不能删除 A 的任务
+    const bDel = await request(app)
+      .delete(`/api/tasks/${aId}`)
+      .query({ email: 'b@ex.com' })
+    expect(bDel.status).toBe(404)
+  })
+
+  it('邮箱可删除自己的任务', async () => {
+    const app = createApp()
+    const email = 'del@example.com'
+
+    const created = await request(app)
+      .post('/api/tasks')
+      .send({ email, title: '待删' })
+    const id = created.body.task.id as string
+
+    const deleted = await request(app)
+      .delete(`/api/tasks/${id}`)
+      .query({ email })
+    expect(deleted.status).toBe(200)
+    expect(deleted.body.ok).toBe(true)
+
+    const listed = await request(app).get('/api/tasks').query({ email })
+    expect(listed.body.tasks).toHaveLength(0)
+
+    const got = await request(app).get(`/api/tasks/${id}`).query({ email })
+    expect(got.status).toBe(404)
   })
 })

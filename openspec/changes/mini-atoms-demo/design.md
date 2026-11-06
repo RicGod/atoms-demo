@@ -60,8 +60,12 @@
 
 ### 5. 持久化：Turso + Task 表
 
-- **选择**：Turso（libSQL）；逻辑模型以 Task 为聚合（email、prompt、html、source、updated_at、meta 等）。
+- **选择**：Turso（libSQL）；逻辑模型以 Task 为聚合（email、prompt、html、**chat 时间线**、source、updated_at、meta 等）。
 - **凭证**：`TURSO_DATABASE_URL` + `TURSO_AUTH_TOKEN`，仅环境变量 / `.env.local`。
+- **Artifact + 对话**：登录用户在项目内生成成功后，**同一次覆盖写** `html` 与 `chat_json`（原子一致）；失败不落库。
+- **chat 内容**：仅 `user` / `assistant` / `version`；**不存**流式思考过程。`prompt` 字段仅为「最近一轮需求摘要」，完整历史以 `chat_json` 为准。
+- **裁剪**：服务端规范化时最多保留最近约 120 条；单条 user/assistant 文本过长截断。
+- **列表**：Task 列表不返回完整 `html` / `chat`（减小体积）；打开单条时还原对话与预览。
 - **不做**：分享直链、公开匿名可枚举的「全世界作品墙」（列表按邮箱隔离）。
 
 ### 6. 预览：iframe sandbox
@@ -69,6 +73,7 @@
 - `iframe` + `sandbox`：`allow-scripts`（必要时 `allow-forms`）；**尽量不** `allow-same-origin`。
 - 内容用 `srcDoc` 或 blob URL 注入生成 HTML。
 - 预置 3–4 个仓库内静态 HTML 示例标签（供访客兜底/演示）。
+- **迭代呈现（非落库）**：已有 Artifact 再生成时，代码区生成中保留上一版全文（不整页流式重刷）；成功后默认回 Preview；代码 Tab MAY 展示相对上一版的行级变更对照（折叠未改行）。Diff **不是**持久化实体，打开 Task 只恢复最终 Artifact + Chat Timeline。
 
 ### 7. 赛马：唯一延展亮点
 

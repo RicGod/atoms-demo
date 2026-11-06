@@ -53,10 +53,13 @@ export function buildUserContent(options: {
 
   const html = options.currentHtml?.trim()
   if (html) {
-    // 步骤：附带当前整页 HTML，要求整页覆盖生成
+    // 步骤：附带当前整页，要求增量针对性修改（仍输出完整文档）
     const clipped =
       html.length > 24_000 ? `${html.slice(0, 24_000)}\n<!-- truncated -->` : html
     parts.push(`【当前 HTML】\n${clipped}`)
+    parts.push(
+      `【迭代约束】本轮是在当前 HTML 上的增量修改：只实现【本轮需求】，其余保持原样；输出修改后的完整 HTML，不要无关重写。`,
+    )
   }
 
   parts.push(`【本轮需求】\n${options.prompt.trim()}`)

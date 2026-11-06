@@ -1,4 +1,3 @@
-import 'dotenv/config'
 import { config } from 'dotenv'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
@@ -7,9 +6,9 @@ import express from 'express'
 import { createApp } from './app.js'
 import { bailianKeyPresenceLabel } from './lib/bailian-env.js'
 
-// 优先加载 .env.local（本地密钥），不覆盖已有 process.env
-// 系统/用户环境变量（如 aliQwen-api）已在 process.env 中，不会被空的 .env 覆盖
-config({ path: '.env.local', override: false })
+// 步骤：先 .env 再 .env.local（local 覆盖），避免空/旧 .env 挡住本地 Key
+config({ path: '.env' })
+config({ path: '.env.local', override: true })
 
 const app = createApp()
 

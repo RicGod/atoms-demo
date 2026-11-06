@@ -15,6 +15,7 @@ import {
 import { getBailianApiKey, isBailianConfigured } from './lib/bailian-env.js'
 import {
   createTask,
+  deleteTask,
   getTask,
   isTursoConfigured,
   listTasks,
@@ -276,10 +277,10 @@ export function createApp(options: CreateAppOptions = {}) {
     }
     try {
       const tasks = await listTasks(email)
-      // 列表不返回完整 html，减小体积
+      // 列表不返回完整 html / chat，减小体积
       res.json({
         ok: true,
-        tasks: tasks.map(({ html: _h, ...rest }) => ({
+        tasks: tasks.map(({ html: _h, chat: _c, ...rest }) => ({
           ...rest,
           hasHtml: Boolean(_h),
         })),
@@ -334,6 +335,25 @@ export function createApp(options: CreateAppOptions = {}) {
     }
   })
 
+  /** 删除项目；访客拒绝 */
+  app.delete('/api/tasks/:id', async (req, res) => {
+    const email = String(
+      req.query.email ?? req.body?.email ?? '',
+    ).trim()
+    if (!email) {
+      res.status(403).json({ ok: false, error: '访客无法删除，请先登记邮箱' })
+      return
+    }
+    try {
+      await deleteTask(req.params.id, email)
+      res.json({ ok: true })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      const status = /不存在|无权/.test(msg) ? 404 : 500
+      res.status(status).json({ ok: false, error: msg })
+    }
+  })
+
   /** 覆盖保存当前 Artifact；访客拒绝 */
   app.put('/api/tasks/:id', async (req, res) => {
     const email = String(req.body?.email ?? '').trim()
@@ -347,6 +367,8 @@ export function createApp(options: CreateAppOptions = {}) {
       req.body?.generationMode ?? 'builtin',
     ) as GenerationMode
     const source = (req.body?.source as TaskSource | undefined) ?? 'single'
+    // 步骤：对话可选；未传则服务端保留原 chat
+    const chat = req.body?.chat
 
     if (!html.trim()) {
       res.status(400).json({ ok: false, error: '缺少可保存的 HTML' })
@@ -362,6 +384,7 @@ export function createApp(options: CreateAppOptions = {}) {
         generationMode,
         source,
         title: req.body?.title,
+        chat,
       })
       res.json({ ok: true, task })
     } catch (e) {
