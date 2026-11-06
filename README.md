@@ -90,8 +90,9 @@ npm run dev:web
 
 内置模型：
 
-- baseUrl：`https://maas.qianwenaiapi.com/compatible-mode/v1`
-- models：`qwen3.8-omni-flash` / `qwen3.8-max` / `qwen3.8-flash`
+- baseUrl：`https://maas.qianwenaiapi.com/compatible-mode/v1`（百炼 OpenAI 兼容口；四模型共用）
+- models：`qwen3.8-omni-flash` / `qwen3.8-max` / `qwen3.8-flash` / `deepseek-v4.1-flash`
+- `deepseek-v4.1-flash`：仅切换模型名，仍走上述 BAILIAN 兼容端点与同一 Key（`aliQwen-api` / `BAILIAN_API_KEY`）；当前**不**单独配置 DeepSeek 官方 `baseURL` / `DEEPSEEK_API_KEY`
 
 ## 部署（Render · 推荐）
 

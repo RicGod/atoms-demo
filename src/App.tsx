@@ -688,6 +688,8 @@ export default function App() {
         <GuestHome
           prompt={prompt}
           onPromptChange={setPrompt}
+          model={model}
+          onModelChange={setModel}
           streaming={streaming}
           statusText={status.text}
           statusError={status.kind === 'error'}

@@ -392,9 +392,99 @@ select:focus-visible,
   box-shadow: var(--focus);
 }
 
-.guest-actions {
-  margin-top: 0.75rem;
-  justify-content: flex-end;
+/* 步骤：输入框内模型 chips（可横向滚动，避免挤爆布局） */
+.guest-model-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.85rem;
+}
+
+.chip-model {
+  border-radius: 999px;
+  padding: 0.28rem 0.7rem;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: -0.01em;
+  background: #f8fafc;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chip-model:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--border-strong);
+  background: #fff;
+}
+
+.chip-model.active {
+  color: var(--accent-hover);
+  border-color: rgba(14, 116, 144, 0.35);
+  background: var(--accent-soft);
+}
+
+/* 步骤：底栏提示 + 圆形上送，不抢主标题 */
+.guest-compose-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.65rem;
+}
+
+.guest-mode-hint {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--muted);
+  text-align: left;
+}
+
+.btn-send-circle {
+  flex-shrink: 0;
+  width: 2.35rem;
+  height: 2.35rem;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: var(--text);
+  color: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12);
+  transition: background 0.15s ease, transform 0.12s ease, opacity 0.12s ease;
+}
+
+.btn-send-circle:hover:not(:disabled) {
+  background: #1e293b;
+  transform: translateY(-1px);
+}
+
+.btn-send-circle:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.send-spinner {
+  width: 0.9rem;
+  height: 0.9rem;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin-send 0.7s linear infinite;
+}
+
+@keyframes spin-send {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* 步骤：低调示例 chips，无大标题；参考站 mono + 小圆角 */
