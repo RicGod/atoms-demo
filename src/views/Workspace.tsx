@@ -268,7 +268,8 @@ export function Workspace(props: {
                 </button>
               </>
             ) : (
-              <span className="hint">访客体验 · 不会保存 · 赛马需登录</span>
+              {/* 步骤：访客工作区轻提示；登录后可保存项目与持续对话 */}
+              <span className="hint">当前为访客模式 · 登录后解锁更多功能</span>
             )}
             {modeBadgeLabel(props.mode) ? (
               <span className={`badge ${props.mode ?? ''}`}>

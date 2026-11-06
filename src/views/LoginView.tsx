@@ -1,6 +1,6 @@
 import { AtomsMark } from '../components/AtomsMark'
 
-/** 邮箱即登录（无验证码）；冒充风险明示 */
+/** 邮箱即登录（无验证码）；轻提示身份按邮箱识别 */
 export function LoginView(props: {
   emailDraft: string
   onEmailChange: (v: string) => void
@@ -38,12 +38,14 @@ export function LoginView(props: {
             }}
           />
         </div>
+        {/* 步骤：产品化轻提示，避免「冒充 / OIDC」等生硬技术表述 */}
         <p className="hint warn">
-          冒充风险：任何人填入同一邮箱即视为该身份，不做验证码 / OIDC。
+          当前未做校验，填入同一邮箱即视为该身份。
         </p>
-        <div className="row">
+        {/* 步骤：主按钮文案为「登录」，并居中展示 */}
+        <div className="row login-actions">
           <button className="btn" type="button" onClick={props.onSubmit}>
-            进入项目
+            登录
           </button>
         </div>
         <p className={`status-line ${props.statusError ? 'error' : ''}`}>

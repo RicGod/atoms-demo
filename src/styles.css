@@ -399,6 +399,11 @@ select:focus-visible,
   font-size: 1.6rem;
 }
 
+/* 步骤：登录主按钮居中 */
+.login-actions {
+  justify-content: center;
+}
+
 /* —— 项目列表（图1） —— */
 .app-shell {
   display: grid;

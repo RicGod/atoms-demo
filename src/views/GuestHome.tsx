@@ -30,8 +30,9 @@ export function GuestHome(props: {
           Instant HTML · Live Preview
         </p>
         <h1 className="hero-title">Atoms</h1>
+        {/* 步骤：访客能力叙事产品化——可预览；登录后解锁保存与持续对话 */}
         <p className="hero-sub">
-          一句话生成可交互单文件 HTML，即时预览。登录后可保存为项目并对话迭代。
+          一句话生成可交互单文件 HTML，即时预览。登录后解锁更多功能，可保存项目、持续对话优化。
         </p>
 
         <div className="guest-compose">
@@ -54,7 +55,8 @@ export function GuestHome(props: {
             >
               {props.streaming ? '生成中…' : '生成预览'}
             </button>
-            <span className="hint">访客可预览，登录后可保存 · 赛马需登录</span>
+            {/* 步骤：轻提示解锁能力，不罗列赛马等技术点 */}
+            <span className="hint">当前为访客模式 · 登录后解锁更多功能</span>
           </div>
           <p className={`status-line ${props.statusError ? 'error' : ''}`}>
             {props.statusText}
