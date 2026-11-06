@@ -1,0 +1,24 @@
+# Render Blueprint：单个 Web Service 同时提供 API + Vite 静态资源
+# Dashboard → New → Blueprint → 连接本仓库即可；密钥变量需在面板手工填入
+services:
+  - type: web
+    name: atoms-demo
+    runtime: node
+    plan: free
+    region: singapore
+    # --include=dev：即使 NODE_ENV=production 也装齐 vite/typescript 等构建依赖
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      # Render 自动注入 PORT；勿在此硬编码
+      - key: NODE_ENV
+        value: production
+      # 百炼 Key（平台变量名勿用连字符；勿依赖 aliQwen-api）
+      - key: BAILIAN_API_KEY
+        sync: false
+      # Turso 持久化（可选；未配则进程内内存）
+      - key: TURSO_DATABASE_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false

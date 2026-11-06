@@ -30,7 +30,7 @@ export type CreateAppOptions = {
   streamHtml?: StreamHtmlFn
 }
 
-/** 创建 Express 应用：本地 server 与 Vercel serverless 共用 */
+/** 创建 Express 应用：本地 / Render Node 与可选 Vercel serverless 共用 */
 export function createApp(options: CreateAppOptions = {}) {
   // 可测性 seam：允许注入 mock LLM，默认仍为真实 streamBuiltinHtml
   const streamHtml = options.streamHtml ?? streamBuiltinHtml

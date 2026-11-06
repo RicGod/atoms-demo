@@ -6,7 +6,7 @@
 
 ## What Changes
 
-- 新建可部署 Web 应用：**Vite + React + 独立 API**；持久化 **Turso**；部署 **Vercel**。
+- 新建可部署 Web 应用：**Vite + React + 独立 API**；持久化 **Turso**；部署优先 **Render**（Vercel 可选备选）。
 - 核心链路：Prompt → 服务端（或浏览器自配）LLM 生成**单文件 HTML** → iframe Preview →（已登录）Task 内覆盖保存。
 - **身份**：「登录」= 提交邮箱登记（无验证码、无 OIDC）；Email → 多个 Task；进入保存路径前须新建/打开 Task；Task 内只保留当前选定一份 Artifact（覆盖写）。
 - **访客 vs 登录**：未填邮箱可用内置模型生成并 Preview，**不持久化**，常驻提醒；禁止保存/无任务列表。已填邮箱须先 Task 再生成并保存。
@@ -14,7 +14,7 @@
 - **超时（流式）**：非墙钟硬掐；首包 ~30s、空闲 ~60s；可选极大保底（如 10min）。超时后 mock 仅未登录；已登录失败 + 重试/换模型/自配。
 - **延展**：赛马 = 唯一延展亮点；2 路并行 + 用户择优（无自动打分）；核心闭环不稳则整段砍。
 - **明确不做**：分享直链、OIDC、版本树、Score 进模型。
-- 尽早 Vercel 占位；优先级：**链接 > 闭环 > 持久化 > 赛马**。
+- 尽早 Render 占位；优先级：**链接 > 闭环 > 持久化 > 赛马**。
 - README 写清与通过案例差异及未做项。
 
 ## Capabilities
@@ -33,7 +33,7 @@
 ## Impact
 
 - **代码**：Vite + React 前端 + 独立 API（生成、Task CRUD、可选赛马）；实现阶段由 `openspec apply` 执行，本提案不写业务代码。
-- **依赖**：百炼兼容 HTTP、Turso、Vercel。
+- **依赖**：百炼兼容 HTTP、Turso、Render（可选保留 Vercel 配置）。
 - **安全**：`BAILIAN_API_KEY` / Turso 凭证仅服务端；自配 Key 仅浏览器本地且 UI 明确「不做服务端持久化」；密钥永不进 git。
-- **运维**：`BAILIAN_API_KEY`、`TURSO_DATABASE_URL`、`TURSO_AUTH_TOKEN`；公网域名在首次成功部署后产生。
+- **运维**：`BAILIAN_API_KEY`、`TURSO_DATABASE_URL`、`TURSO_AUTH_TOKEN`；`PORT` 由 Render 注入；公网域名在首次成功部署后产生。
 - **领域**：见 `GLOSSARY.md`、`docs/adr/0002-task-is-durable-aggregate-under-email.md`（取代 ADR-0001）。

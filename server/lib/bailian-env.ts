@@ -1,14 +1,14 @@
 /**
  * 百炼 API Key 环境变量读取
  * 本地优先系统/用户变量 `aliQwen-api`（含连字符，须用括号取值）；
- * 若无则回退 `BAILIAN_API_KEY`（兼容 .env.example / Vercel 文档命名）。
+ * 若无则回退 `BAILIAN_API_KEY`（兼容 .env.example / Render 等平台命名）。
  * 切勿把真实 Key 写入仓库或打印到日志。
  */
 
 /** 本地系统环境变量名（含连字符） */
 export const ALIQWEN_API_ENV = 'aliQwen-api'
 
-/** 文档与 Vercel 推荐的兼容变量名（无连字符） */
+/** 文档与 Render（及可选 Vercel）推荐的兼容变量名（无连字符） */
 export const BAILIAN_API_ENV = 'BAILIAN_API_KEY'
 
 /**

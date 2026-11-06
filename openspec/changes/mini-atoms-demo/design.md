@@ -2,13 +2,13 @@
 
 ## Context
 
-见 `proposal.md` Why。仓库为绿场；grilling R1–R4 + 用户修正已达成共识。约束：约 3–4h MVP、邮箱登记（非 OIDC）、Key 以服务端内置为主、尽早 Vercel 公网部署。领域演进见 `GLOSSARY.md` 与 ADR-0002（取代 ADR-0001）。
+见 `proposal.md` Why。仓库为绿场；grilling R1–R4 + 用户修正已达成共识。约束：约 3–4h MVP、邮箱登记（非 OIDC）、Key 以服务端内置为主、尽早 Render 公网部署（Vercel 可选备选）。领域演进见 `GLOSSARY.md` 与 ADR-0002（取代 ADR-0001）。
 
 ## Goals / Non-Goals
 
 **Goals:**
 
-- Vite + React + 独立 API + Turso + Vercel，打通 Prompt → 生成 → iframe →（登录后）Task 持久化。
+- Vite + React + 独立 API + Turso + Render，打通 Prompt → 生成 → iframe →（登录后）Task 持久化。
 - 内置百炼三模型 + 额度/失败引导自配；访客才可 mock/预置示例；交卷以真 LLM 为准。
 - 流式超时策略（首包/空闲/可选保底），非墙钟硬掐总时长。
 - 赛马 2 路为可砍延展；不阻塞主路径。
@@ -78,7 +78,7 @@
 
 ### 8. 部署与文档
 
-- 尽早 Vercel 占位；优先级 链接 > 闭环 > 持久化 > 赛马。
+- 尽早 Render 占位（单 Web Service：`build` + Node 同时 serve API 与 `dist`）；Vercel 为可选备选。优先级 链接 > 闭环 > 持久化 > 赛马。
 - README SHALL 写清：与通过案例差异（服务端内置 Key vs 浏览器 BYOK）及未做项。
 
 ## Risks / Trade-offs
@@ -91,7 +91,7 @@
 
 ## Migration Plan
 
-1. 脚手架 + 健康检查 + 尽早 Vercel 占位。
+1. 脚手架 + 健康检查 + 尽早 Render 占位。
 2. 内置百炼流式生成 + iframe Preview（访客路径）。
 3. 邮箱登记 + Task CRUD（Turso）+ 登录保存路径。
 4. 自配模型、超时/额度引导、预置示例标签。

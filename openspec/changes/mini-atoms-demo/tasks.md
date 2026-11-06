@@ -7,8 +7,8 @@
 - [x] 1.1 初始化 **Vite + React + 独立 API**，验证 `dev` 可启动空白页
 - [x] 1.2 配置 `.gitignore`（含 `.env*`）与 `.env.example` / `.env.local` 占位（`BAILIAN_API_KEY`、`TURSO_DATABASE_URL`、`TURSO_AUTH_TOKEN`），验证示例文件无真实密钥
 - [x] 1.3 增加健康检查接口（如 `/api/health`），验证本地可返回 OK
-- [ ] 1.4 **尽早**部署到 Vercel 占位并配置环境变量槽位；验证公网 health（优先拿链接）
-  - 代码侧已就绪：`vercel.json` + `api/[[...path]].ts` + README 环境变量说明；需用户 Vercel 账号实际部署后回填公网 URL
+- [ ] 1.4 **尽早**部署到 Render 占位并配置环境变量槽位；验证公网 health（优先拿链接）
+  - 代码侧已就绪：`render.yaml` + 生产 `npm start`（API + `dist`）+ README；Vercel 配置仍保留为备选；需用户 Render 账号实际部署后回填公网 URL
 
 ## 2. HTML 生成（html-generation）
 
@@ -47,7 +47,7 @@
 
 - [x] 6.1 README 写清与通过案例差异（服务端内置 Key vs 浏览器 BYOK）及未做项（无分享直链 / 无 OIDC / 无版本树 / Score 不进模型等）
 - [ ] 6.2 对照避坑：public 仓库/链接、无 Key 入库、真实交互+（登录后）持久化；记录公网 URL
-  - README 已对照避坑；公网 URL 待 Vercel 部署后填写
+  - README 已对照避坑；公网 URL 待 Render 部署后填写
 - [ ] 6.3 端到端：真 LLM 交卷路径（内置 Key）走通 Prompt→Preview→Task 保存→回看
   - 代码路径已就绪；需配置 `BAILIAN_API_KEY`（建议同时配 Turso）后手工验收
 

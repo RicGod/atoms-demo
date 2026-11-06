@@ -70,10 +70,11 @@ npm run dev:web
 | 变量 | 说明 |
 | --- | --- |
 | `aliQwen-api` | **本地优先**：系统/用户环境变量中的百炼 Key（含连字符）；服务端 `process.env['aliQwen-api']` |
-| `BAILIAN_API_KEY` | 兼容回退名；`.env.local` 与 **Vercel 推荐用此名**（平台变量名通常不允许连字符） |
+| `BAILIAN_API_KEY` | 兼容回退名；`.env.local` 与 **Render 推荐用此名**（平台变量名通常不允许连字符） |
 | `TURSO_DATABASE_URL` | Turso 数据库 URL；未配置则进程内内存存储 |
 | `TURSO_AUTH_TOKEN` | Turso Auth Token |
 | `API_PORT` | 本地 API 端口，默认 `3001` |
+| `PORT` | **Render 自动注入**的监听端口；生产启动优先读 `PORT`，勿在面板写死 |
 
 读取顺序：`aliQwen-api` → `BAILIAN_API_KEY`。二者择一即可；本地已设系统变量时不必再写 `.env.local`。
 
@@ -88,16 +89,27 @@ npm run dev:web
 - baseUrl：`https://maas.qianwenaiapi.com/compatible-mode/v1`
 - models：`qwen3.8-omni-flash` / `qwen3.8-max` / `qwen3.8-flash`
 
-## 部署（Vercel）
+## 部署（Render · 推荐）
 
-代码侧已准备 `vercel.json` 与 `api/[[...path]].ts` catch-all。
+**默认方案**：单个 Web Service，`npm run build` 后由 Node（`npm start`）同时 serve `/api/*` 与 Vite 静态 `dist/`（见 `server/index.ts` + `render.yaml`）。
 
-1. 将仓库设为 **public**（笔试要求）
-2. 在 Vercel Import 本仓库
-3. 配置环境变量槽位：`BAILIAN_API_KEY`（**不要依赖** `aliQwen-api`：Vercel 变量名通常不允许连字符）、`TURSO_DATABASE_URL`、`TURSO_AUTH_TOKEN`
-4. 部署后访问 `/api/health` 冒烟（`bailianConfigured: true` 表示 Key 已生效）
+仓库已含 `render.yaml` Blueprint；亦可在 Dashboard 手工创建 Web Service。
 
-> 本 README **不假装已部署成功**。公网 URL 需你在 Vercel 账号完成首次部署后回填到提交材料。
+1. 将 GitHub 仓库 **`RicGod/atoms-demo`** 设为 **public**（笔试要求）
+2. 打开 [Render](https://render.com/) → **New** → **Blueprint**（选本仓库，读 `render.yaml`），或 **Web Service** 直连该仓库
+3. 构建 / 启动命令（Blueprint 已写好；手工创建时照填）：
+   - **Build Command**：`npm install --include=dev && npm run build`
+   - **Start Command**：`npm start`
+4. 环境变量（Environment）必填 / 建议：
+   - `BAILIAN_API_KEY`（**不要依赖** `aliQwen-api`：平台变量名通常不允许连字符）
+   - `TURSO_DATABASE_URL`、`TURSO_AUTH_TOKEN`（建议；未配则进程内内存，重启丢失）
+   - `PORT` 由 Render 注入，**无需**也不应手工写死
+   - `NODE_ENV=production`（Blueprint 已设）
+5. 部署后访问 `/api/health` 冒烟（`bailianConfigured: true` 表示 Key 已生效）
+
+> 本 README **不假装已部署成功**。公网 URL 需你在 Render 账号完成首次部署后回填到提交材料。
+
+**备选（Vercel）**：仍保留 `vercel.json` 与 `api/[[...path]].ts`，可按需 Import；主路径以 Render 为准。
 
 当前公网 URL：（部署后填写）
 
@@ -105,7 +117,7 @@ npm run dev:web
 
 1. **访客**：输入 Prompt → 生成 → iframe 预览；失败/超时可 mock 或点预置示例；**不能保存**
 2. **已登录**：登记邮箱 → 新建/打开 Task → 生成 →「保存到 Task」覆盖写 → 刷新后从列表回看
-3. **交卷主路径**：配置真实百炼 Key（本地 `aliQwen-api` 或 `BAILIAN_API_KEY`；Vercel 用 `BAILIAN_API_KEY`）+（建议）Turso，走内置生成而非 mock
+3. **交卷主路径**：配置真实百炼 Key（本地 `aliQwen-api` 或 `BAILIAN_API_KEY`；Render 用 `BAILIAN_API_KEY`）+（建议）Turso，走内置生成而非 mock
 
 ## 剩余能力
 
