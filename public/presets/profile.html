@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>个人主页生成器</title>
+  <style>
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: #1e3330;
+      color: #1a2e2a;
+      font-family: "Palatino Linotype", Palatino, "Songti SC", "Microsoft YaHei", serif;
+    }
+    .sheet {
+      width: min(40rem, calc(100% - 2rem));
+      margin: 2.2rem auto;
+      padding: 2.4rem 2.1rem 1.8rem;
+      background: #f3f6f4;
+      box-shadow: 8px 8px 0 #0e1c1a;
+    }
+    h1 { margin: 0; font-size: 2.6rem; font-weight: 500; letter-spacing: 0; line-height: 1.15; }
+    .lead { margin: .35rem 0 1.4rem; color: #3d5c56; font-size: 1.05rem; }
+    .field { display: flex; flex-direction: column; gap: .3rem; margin: 0 0 .9rem; }
+    .field span { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; font-size: .92rem; }
+    input, textarea, button { font: inherit; }
+    input, textarea {
+      width: 100%;
+      border: 0;
+      border-bottom: 1px solid #1a2e2a;
+      background: transparent;
+      color: #1a2e2a;
+      padding: .4rem 0;
+      border-radius: 0;
+    }
+    textarea { min-height: 5.5rem; resize: vertical; line-height: 1.55; }
+    .err { min-height: 1.3rem; margin: 0 0 .4rem; color: #8c2f2f; font-family: "Microsoft YaHei", sans-serif; font-size: .92rem; }
+    button {
+      border: 0;
+      background: #1a2e2a;
+      color: #f3f6f4;
+      padding: .65rem 1rem;
+      cursor: pointer;
+    }
+    button.back {
+      margin-top: 1.6rem;
+      background: transparent;
+      color: #1a2e2a;
+      border-bottom: 1px solid #1a2e2a;
+      padding: .2rem 0;
+    }
+    .role { margin: .4rem 0 0; font-size: 1.2rem; }
+    .bio { margin: 1rem 0 0; max-width: 38rem; line-height: 1.6; }
+    .skills { display: flex; flex-wrap: wrap; gap: .45rem; margin: 1.1rem 0 0; padding: 0; list-style: none; }
+    .skills li { border: 1px solid #1a2e2a; padding: .2rem .5rem; font-family: "Microsoft YaHei", sans-serif; font-size: .92rem; }
+    .contact { margin: 1.1rem 0 0; font-family: "Microsoft YaHei", sans-serif; }
+    :focus-visible { outline: 2px solid #1a2e2a; outline-offset: 3px; }
+  </style>
+</head>
+<body>
+  <main class="sheet">
+    <form id="editor">
+      <h1>个人主页</h1>
+      <p class="lead">填好之后生成一页可以给人看的介绍。</p>
+      <label class="field"><span>姓名</span><input id="name" value="林可" autocomplete="name" /></label>
+      <label class="field"><span>职业</span><input id="role" value="产品设计师" /></label>
+      <label class="field"><span>简介</span><textarea id="bio">擅长把含糊的需求收成清晰的界面，并照顾空状态和逾期这类边界。</textarea></label>
+      <label class="field"><span>技能（用逗号或顿号分开）</span><input id="skills" value="需求拆解、信息排版、交互原型、可用性" /></label>
+      <label class="field"><span>联系方式</span><input id="contact" value="lin.ke@example.com" /></label>
+      <p class="err" id="err" role="alert"></p>
+      <button type="submit">生成主页</button>
+    </form>
+    <article id="sheet" hidden></article>
+  </main>
+  <script>
+    (function () {
+      var editor = document.getElementById('editor');
+      var sheet = document.getElementById('sheet');
+      var err = document.getElementById('err');
+
+      // 步骤：技能按逗号或顿号拆开；空字段整块不出现在成稿里
+      function splitSkills(raw) {
+        return raw.split(/[,，、]/).map(function (part) { return part.trim(); }).filter(Boolean);
+      }
+
+      function showForm() {
+        sheet.hidden = true;
+        sheet.replaceChildren();
+        editor.hidden = false;
+        document.getElementById('name').focus();
+      }
+
+      function buildSheet() {
+        var name = document.getElementById('name').value.trim();
+        var role = document.getElementById('role').value.trim();
+        var bio = document.getElementById('bio').value.trim();
+        var skills = splitSkills(document.getElementById('skills').value);
+        var contact = document.getElementById('contact').value.trim();
+        sheet.replaceChildren();
+
+        var heading = document.createElement('h1');
+        heading.textContent = name;
+        heading.tabIndex = -1;
+        sheet.append(heading);
+
+        if (role) {
+          var roleEl = document.createElement('p');
+          roleEl.className = 'role';
+          roleEl.textContent = role;
+          sheet.append(roleEl);
+        }
+        if (bio) {
+          var bioEl = document.createElement('p');
+          bioEl.className = 'bio';
+          bioEl.textContent = bio;
+          sheet.append(bioEl);
+        }
+        if (skills.length) {
+          var list = document.createElement('ul');
+          list.className = 'skills';
+          skills.forEach(function (skill) {
+            var item = document.createElement('li');
+            item.textContent = skill;
+            list.append(item);
+          });
+          sheet.append(list);
+        }
+        if (contact) {
+          var contactEl = document.createElement('p');
+          contactEl.className = 'contact';
+          contactEl.textContent = contact;
+          sheet.append(contactEl);
+        }
+
+        var back = document.createElement('button');
+        back.type = 'button';
+        back.className = 'back';
+        back.textContent = '返回编辑';
+        back.addEventListener('click', showForm);
+        sheet.append(back);
+
+        editor.hidden = true;
+        sheet.hidden = false;
+        heading.focus();
+      }
+
+      editor.addEventListener('submit', function (e) {
+        e.preventDefault();
+        // 步骤：页内切换成稿，不请求生成接口；姓名为空就停在表单
+        var name = document.getElementById('name').value.trim();
+        if (!name) {
+          err.textContent = '先写上姓名。';
+          document.getElementById('name').focus();
+          return;
+        }
+        err.textContent = '';
+        buildSheet();
+      });
+    })();
+  </script>
+</body>
+</html>

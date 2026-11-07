@@ -6,7 +6,12 @@ import {
   type BuiltinModel,
 } from '../../shared/constants.js'
 import { HTML_GENERATOR_SYSTEM_PROMPT } from '../../shared/ui-ux-skill.js'
+import { sanitizeChangeSummary } from '../../shared/versions.js'
 import { isQuotaOrAuthFailure } from './quota.js'
+
+/** 版本改动摘要：短超时，失败由调用方回退 Prompt 截断 */
+const SUMMARY_TIMEOUT_MS = 12_000
+const SUMMARY_MODEL: BuiltinModel = 'qwen3.8-flash'
 
 export type StreamResult =
   | { ok: true; html: string }
@@ -64,6 +69,90 @@ export function buildUserContent(options: {
 
   parts.push(`【本轮需求】\n${options.prompt.trim()}`)
   return parts.join('\n\n')
+}
+
+/**
+ * 为本轮生成另要一句短摘要（非流式），供版本卡展示
+ * 失败返回 ok:false，由前端/调用方回退到 Prompt 截断
+ */
+export async function summarizeVersionChange(options: {
+  prompt: string
+  apiKey: string
+  /** 是否在已有页面上迭代 */
+  isIteration?: boolean
+  model?: BuiltinModel
+  signal?: AbortSignal
+}): Promise<
+  | { ok: true; summary: string }
+  | { ok: false; message: string }
+> {
+  const apiKey = options.apiKey.trim()
+  if (!apiKey) {
+    return { ok: false, message: '未配置百炼 Key' }
+  }
+  const prompt = options.prompt.trim()
+  if (!prompt) {
+    return { ok: false, message: 'Prompt 为空' }
+  }
+
+  const controller = new AbortController()
+  const onAbort = () => controller.abort()
+  options.signal?.addEventListener('abort', onAbort)
+  const timer = setTimeout(() => controller.abort(), SUMMARY_TIMEOUT_MS)
+
+  const model = options.model ?? SUMMARY_MODEL
+  const iterHint = options.isIteration
+    ? '这是在已有页面上的增量修改。'
+    : '这是从零生成的新页面。'
+
+  try {
+    const res = await fetch(`${BAILIAN_BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        stream: false,
+        temperature: 0.3,
+        max_tokens: 80,
+        messages: [
+          {
+            role: 'system',
+            content:
+              '你是产品文案助手。把用户本轮需求改写成一句≤40字的简体中文「改动摘要」，供版本卡片展示。必须保留需求里的具体对象与动作（如颜色、按钮、布局），改写成「做了X」口吻。只输出摘要正文。禁止空泛套话（如「完成调整」「优化页面」「增量修改」「按需求更新」）；禁止说需求不明确。\n示例：需求「把按钮改成红色」→「按钮改为红色」。',
+          },
+          {
+            role: 'user',
+            content: `${iterHint}\n用户需求：\n${prompt.slice(0, 500)}`,
+          },
+        ],
+      }),
+      signal: controller.signal,
+    })
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => res.statusText)
+      return { ok: false, message: errText || `HTTP ${res.status}` }
+    }
+
+    const json = (await res.json()) as {
+      choices?: Array<{ message?: { content?: string } }>
+    }
+    const raw = json.choices?.[0]?.message?.content ?? ''
+    const summary = sanitizeChangeSummary(raw, prompt)
+    if (!summary || summary === '（无说明）') {
+      return { ok: false, message: '摘要为空' }
+    }
+    return { ok: true, summary }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return { ok: false, message }
+  } finally {
+    options.signal?.removeEventListener('abort', onAbort)
+    clearTimeout(timer)
+  }
 }
 
 /** 从模型文本中剥离可能的 markdown 围栏，尽量得到纯 HTML */

@@ -7,7 +7,7 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   test: {
     environment: 'node',
-    include: ['server/**/*.test.ts'],
+    include: ['server/**/*.test.ts', 'shared/**/*.test.ts'],
     // 单测串行，避免内存 tasks 互相污染
     fileParallelism: false,
     // Vitest 4：池选项顶层化

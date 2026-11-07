@@ -127,10 +127,74 @@ describe('tasks API（libSQL）', () => {
     const got = await request(app).get(`/api/tasks/${id}`).query({ email })
     expect(got.status).toBe(200)
     expect(got.body.task.chat).toEqual(chat)
+    // 步骤：未传 versions 时，用 html 惰性收成 Version 1
+    expect(got.body.task.versions).toHaveLength(1)
+    expect(got.body.task.currentVersionN).toBe(1)
 
-    // 列表不回完整 chat
+    // 列表不回完整 chat / versions
     const listed = await request(app).get('/api/tasks').query({ email })
     expect(listed.body.tasks[0]).not.toHaveProperty('chat')
+    expect(listed.body.tasks[0]).not.toHaveProperty('versions')
+  })
+
+  it('保存 versions 后可回读并支持回滚指针', async () => {
+    const app = createApp()
+    const email = 'ver@example.com'
+    const created = await request(app)
+      .post('/api/tasks')
+      .send({ email, title: '版本项目' })
+    const id = created.body.task.id as string
+
+    const versions = [
+      {
+        n: 1,
+        promptSummary: '第一版',
+        html: '<html>v1</html>',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
+      {
+        n: 2,
+        promptSummary: '第二版',
+        html: '<html>v2</html>',
+        createdAt: '2026-01-01T00:01:00.000Z',
+      },
+    ]
+
+    const saved = await request(app)
+      .put(`/api/tasks/${id}`)
+      .send({
+        email,
+        prompt: '第二版',
+        html: '<html>v2</html>',
+        generationMode: 'builtin',
+        versions,
+        currentVersionN: 2,
+        chat: [
+          { kind: 'system', id: 's1', text: '已回滚到版本 1' },
+        ],
+      })
+    expect(saved.status).toBe(200)
+    expect(saved.body.task.versions).toHaveLength(2)
+    expect(saved.body.task.currentVersionN).toBe(2)
+
+    // 回滚：Current=1，html 应对齐 v1
+    const rolled = await request(app)
+      .put(`/api/tasks/${id}`)
+      .send({
+        email,
+        prompt: '第二版',
+        html: '<html>v1</html>',
+        generationMode: 'builtin',
+        versions,
+        currentVersionN: 1,
+        chat: [
+          { kind: 'system', id: 's1', text: '已回滚到版本 1' },
+        ],
+      })
+    expect(rolled.status).toBe(200)
+    expect(rolled.body.task.currentVersionN).toBe(1)
+    expect(rolled.body.task.html).toContain('v1')
+    expect(rolled.body.task.chat[0].kind).toBe('system')
   })
 
   it('按邮箱隔离：A 不可见 B 的任务', async () => {

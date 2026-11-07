@@ -32,10 +32,12 @@ export function isBuiltinProfile(p: Pick<ByokProfile, 'id' | 'builtin'>): boolea
 export function createBuiltinPlatformProfile(
   id: string,
   model: string,
+  name?: string,
 ): ByokProfile {
   return {
     id,
-    name: model,
+    // 步骤：展示名与真实 model id 分离，提示额度有限且可自配
+    name: name || model,
     model,
     // 步骤：占位展示用；真正调用走 /api/generate，不读这两项
     baseUrl: 'platform',
@@ -53,7 +55,7 @@ export function createBuiltinFlashProfile(): ByokProfile {
 /** 全部平台默认条目（当前：qwen3.8-flash） */
 export function createBuiltinPlatformProfiles(): ByokProfile[] {
   return BUILTIN_PLATFORM_MODELS.map((m) =>
-    createBuiltinPlatformProfile(m.id, m.model),
+    createBuiltinPlatformProfile(m.id, m.model, m.name),
   )
 }
 

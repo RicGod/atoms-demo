@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>房贷计算器</title>
+  <style>
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: #2a2420;
+      color: #241c16;
+      font-family: Constantia, "Songti SC", "Times New Roman", serif;
+    }
+    .book {
+      width: min(52rem, calc(100% - 1.5rem));
+      margin: 1.4rem auto;
+      padding: 1.4rem 1.5rem 1.6rem;
+      background: #f7f1e4;
+      border: 12px solid #1b3d30;
+    }
+    h1 { margin: 0; font-size: 2rem; font-weight: 500; }
+    .rule { margin: .4rem 0 1rem; font-family: "Microsoft YaHei", sans-serif; font-size: .95rem; }
+    .fields {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+      gap: .85rem 1rem;
+    }
+    label { display: flex; flex-direction: column; gap: .25rem; font-family: "Microsoft YaHei", sans-serif; font-size: .9rem; }
+    input, button { font: inherit; }
+    input {
+      width: 100%;
+      border: 0;
+      border-bottom: 1px solid #241c16;
+      background: transparent;
+      color: #241c16;
+      padding: .35rem 0;
+      border-radius: 0;
+      font-variant-numeric: tabular-nums;
+    }
+    #out { margin-top: 1.1rem; }
+    .sum { margin: 0; }
+    .sum div {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: .55rem 0;
+      border-bottom: 1px solid rgba(30, 107, 69, .45);
+      font-variant-numeric: tabular-nums;
+    }
+    .sum dt { margin: 0; }
+    .sum dd { margin: 0; font-family: Candara, "Segoe UI", sans-serif; }
+    h2 { margin: 1.15rem 0 .4rem; font-size: 1.15rem; font-weight: 500; }
+    .cmp { display: grid; grid-template-columns: 1fr 1fr; }
+    .cmp section { padding: .35rem .8rem .35rem 0; }
+    .cmp section + section { border-left: 1px solid #1e6b45; padding-left: .8rem; }
+    .cmp h3 { margin: 0 0 .35rem; font-size: 1rem; font-weight: 500; }
+    .cmp p { margin: .2rem 0; font-family: Candara, "Segoe UI", sans-serif; font-variant-numeric: tabular-nums; }
+    @media (max-width: 560px) {
+      .cmp { grid-template-columns: 1fr; }
+      .cmp section + section { border-left: 0; padding-left: 0; border-top: 1px solid #1e6b45; margin-top: .7rem; padding-top: .7rem; }
+    }
+    .saved { color: #1e6b45; }
+    .err { margin: .8rem 0 0; color: #8c2f2f; font-family: "Microsoft YaHei", sans-serif; }
+    :focus-visible { outline: 2px solid #1e6b45; outline-offset: 2px; }
+  </style>
+</head>
+<body>
+  <main class="book">
+    <h1>房贷月供</h1>
+    <p class="rule">按等额本息计算，月利率为年利率的十二分之一。</p>
+    <form id="loan" autocomplete="off">
+      <div class="fields">
+        <label>贷款金额（元）<input id="amount" inputmode="decimal" value="1000000" /></label>
+        <label>年利率（%）<input id="rate" inputmode="decimal" value="3.5" /></label>
+        <label>年限（年）<input id="years" inputmode="numeric" value="30" /></label>
+        <label>已还期数<input id="paid" inputmode="numeric" value="12" /></label>
+        <label>提前还款（元）<input id="extra" inputmode="decimal" value="100000" /></label>
+      </div>
+    </form>
+    <div id="out" aria-live="polite"></div>
+  </main>
+  <script>
+    (function () {
+      var form = document.getElementById('loan');
+      var out = document.getElementById('out');
+
+      function yuan(fen) {
+        var neg = fen < 0;
+        var abs = Math.abs(fen);
+        var whole = Math.floor(abs / 100);
+        var frac = String(abs % 100).padStart(2, '0');
+        var grouped = String(whole).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        return (neg ? '-' : '') + grouped + '.' + frac + ' 元';
+      }
+
+      function moneyFen(raw) {
+        var text = String(raw).trim();
+        if (!/^\d+(\.\d+)?$/.test(text)) return null;
+        var value = Number(text);
+        if (!Number.isFinite(value)) return null;
+        return Math.round(value * 100);
+      }
+
+      function intText(raw) {
+        var text = String(raw).trim();
+        if (!/^\d+$/.test(text)) return null;
+        return Number(text);
+      }
+
+      // 步骤：月供按分四舍五入；最后一期用剩余本金加当月利息轧差，避免累进误差
+      function paymentFen(principalFen, monthlyRate, months) {
+        if (months <= 0) return 0;
+        if (monthlyRate === 0) return Math.round(principalFen / months);
+        var pow = Math.pow(1 + monthlyRate, months);
+        return Math.round((principalFen * monthlyRate * pow) / (pow - 1));
+      }
+
+      function buildSchedule(principalFen, monthlyRate, months, pmtFen) {
+        var balance = principalFen;
+        var rows = [];
+        for (var i = 0; i < months && balance > 0; i++) {
+          var interest = monthlyRate === 0 ? 0 : Math.round(balance * monthlyRate);
+          var principalPart = pmtFen - interest;
+          var pay = pmtFen;
+          if (principalPart >= balance || i === months - 1) {
+            principalPart = balance;
+            pay = principalPart + interest;
+            balance = 0;
+          } else if (principalPart <= 0) {
+            return null;
+          } else {
+            balance -= principalPart;
+          }
+          rows.push({ pay: pay, interest: interest, balance: balance });
+        }
+        return rows;
+      }
+
+      // 步骤：缩短年限时月供不变，一直还到余额为 0；末期不足一整期时单独记金额
+      function payDown(balance, pmtFen, monthlyRate) {
+        var periods = 0;
+        var interestSum = 0;
+        var lastPay = 0;
+        while (balance > 0) {
+          if (periods > 1200) return null;
+          var interest = monthlyRate === 0 ? 0 : Math.round(balance * monthlyRate);
+          if (pmtFen <= interest && pmtFen < balance + interest) return null;
+          periods += 1;
+          if (pmtFen >= balance + interest) {
+            lastPay = balance + interest;
+            interestSum += interest;
+            balance = 0;
+            break;
+          }
+          balance -= pmtFen - interest;
+          interestSum += interest;
+          lastPay = pmtFen;
+        }
+        return { periods: periods, interestSum: interestSum, lastPay: lastPay };
+      }
+
+      function line(text, className) {
+        var p = document.createElement('p');
+        if (className) p.className = className;
+        p.textContent = text;
+        return p;
+      }
+
+      function strategyBlock(title, kind, model) {
+        var section = document.createElement('section');
+        var heading = document.createElement('h3');
+        heading.textContent = title;
+        section.append(heading);
+        if (model.settled) {
+          section.append(line('已结清'), line('节省利息 ' + yuan(model.saved), 'saved'));
+          return section;
+        }
+        if (kind === 'shorten') {
+          section.append(line('还可 ' + model.periods + ' 期'));
+          if (model.lastPay !== model.pmt) section.append(line('末期 ' + yuan(model.lastPay)));
+        } else {
+          section.append(line('新月供 ' + yuan(model.pmt)));
+          section.append(line('剩余 ' + model.periods + ' 期'));
+        }
+        section.append(line('节省利息 ' + yuan(model.saved), 'saved'));
+        return section;
+      }
+
+      function fail(message) {
+        out.replaceChildren();
+        var p = document.createElement('p');
+        p.className = 'err';
+        p.setAttribute('role', 'alert');
+        p.textContent = message;
+        out.append(p);
+      }
+
+      function render() {
+        var amount = moneyFen(document.getElementById('amount').value);
+        var rateText = String(document.getElementById('rate').value).trim();
+        var years = intText(document.getElementById('years').value);
+        var paid = intText(document.getElementById('paid').value);
+        var extra = moneyFen(document.getElementById('extra').value);
+
+        if (amount === null || amount <= 0) return fail('贷款金额要大于 0。');
+        if (!/^\d+(\.\d+)?$/.test(rateText)) return fail('年利率要填大于等于 0 的数字。');
+        var rate = Number(rateText);
+        if (!Number.isFinite(rate) || rate < 0) return fail('年利率要填大于等于 0 的数字。');
+        if (years === null || years < 1 || years > 50) return fail('年限要填 1 到 50 的整数。');
+        var months = years * 12;
+        if (paid === null) return fail('已还期数要填 0 或正整数。');
+        if (paid > months) return fail('已还期数超过了总期数。');
+        if (extra === null || extra < 0) return fail('提前还款不能小于 0。');
+
+        // 步骤：月利率 = 年利率 / 12。已还 0 期时，剩余本金就是贷款本金
+        var monthlyRate = rate / 100 / 12;
+        var pmt = paymentFen(amount, monthlyRate, months);
+        var schedule = buildSchedule(amount, monthlyRate, months, pmt);
+        if (!schedule) return fail('这组利率和年限算不出月供。');
+
+        var totalInterest = schedule.reduce(function (sum, row) { return sum + row.interest; }, 0);
+        var paidRows = Math.min(paid, schedule.length);
+        var balance = paidRows === 0 ? amount : schedule[paidRows - 1].balance;
+        var remainingInterest = schedule.slice(paidRows).reduce(function (sum, row) { return sum + row.interest; }, 0);
+        var remainMonths = months - paid;
+
+        var settled = balance <= 0 || extra >= balance;
+        var shorten = { settled: settled, saved: settled ? remainingInterest : 0, periods: 0, lastPay: pmt, pmt: pmt };
+        var reduce = { settled: settled, saved: settled ? remainingInterest : 0, periods: remainMonths, pmt: 0 };
+
+        if (!settled) {
+          var shortened = payDown(balance - extra, pmt, monthlyRate);
+          if (!shortened) return fail('按当前月供无法在提前还款后缩短年限。');
+          shorten.periods = shortened.periods;
+          shorten.lastPay = shortened.lastPay;
+          shorten.saved = remainingInterest - shortened.interestSum;
+
+          var nextPrincipal = balance - extra;
+          var nextPmt = paymentFen(nextPrincipal, monthlyRate, remainMonths);
+          var nextSchedule = buildSchedule(nextPrincipal, monthlyRate, remainMonths, nextPmt);
+          if (!nextSchedule) return fail('提前还款后算不出新的月供。');
+          var nextInterest = nextSchedule.reduce(function (sum, row) { return sum + row.interest; }, 0);
+          reduce.pmt = nextPmt;
+          reduce.periods = nextSchedule.length;
+          reduce.saved = remainingInterest - nextInterest;
+        }
+
+        out.replaceChildren();
+        var sum = document.createElement('dl');
+        sum.className = 'sum';
+        [
+          ['月供', pmt],
+          ['总利息', totalInterest],
+          ['剩余本金', balance]
+        ].forEach(function (pair) {
+          var row = document.createElement('div');
+          var term = document.createElement('dt');
+          term.textContent = pair[0];
+          var value = document.createElement('dd');
+          value.textContent = yuan(pair[1]);
+          row.append(term, value);
+          sum.append(row);
+        });
+
+        var heading = document.createElement('h2');
+        heading.textContent = '若现在一次性提前还款';
+        var cmp = document.createElement('div');
+        cmp.className = 'cmp';
+        cmp.append(strategyBlock('缩短年限', 'shorten', shorten), strategyBlock('减少月供', 'reduce', reduce));
+        out.append(sum, heading, cmp);
+      }
+
+      form.addEventListener('input', render);
+      form.addEventListener('submit', function (e) { e.preventDefault(); });
+      render();
+    })();
+  </script>
+</body>
+</html>

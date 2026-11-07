@@ -16,9 +16,10 @@
 
 **Non-Goals:**
 
-- 分享直链、OIDC/注册验证码、完整版本树、Score 进模型、自动裁判。
+- 分享直链、OIDC/注册验证码、**Git 式分支版本树**、Score 进模型、自动裁判。
 - 生产级多租户审计/计费；自配 Key 的服务端持久化。
 - 把 mock 当作交卷主内容。
+- （相对早期草案）「Version 仅装饰、不可回看」已废止；现为 Task 内**线性 Version 快照**（见 ADR-0003）。
 
 ## Decisions
 
@@ -32,10 +33,12 @@
 
 - **登录** = 提交邮箱登记（无验证码）；UI 提示冒充风险可接受。
 - Email → 多个 Task；进入保存路径前须新建/打开 Task。
-- Task 内只保留当前选定一份 Artifact（**覆盖写**）。
+- Task 持有有序 **Version 快照**（完整 HTML + Prompt 截断）；**Current Version** 决定当前 Artifact / Preview / 导出。
+- 成功生成或赛马择优后**线性追加** Version（不分支）；回滚只改 Current 指针并追加 System Note。
+- 快照上限 20，淘汰最旧且非 Current；旧 Task 打开时惰性收成 Version 1。
 - Creation = Task 当前已保存产物的语义别名（非第二聚合）。
 - 持久化按邮箱隔离，云端 Turso；本机 `localStorage` 最多记上次邮箱。
-- **访客**：内置模型可生成并 Preview，不持久化，常驻提醒；禁止保存/无任务列表。
+- **访客**：可生成 Preview、可本机导出当次 HTML；不持久化、无 Version 历史。
 - **已登录**：须先 Task 再生成并保存。
 
 ### 3. LLM：内置百炼 → 自配 →（仅访客）mock
@@ -60,12 +63,13 @@
 
 ### 5. 持久化：Turso + Task 表
 
-- **选择**：Turso（libSQL）；逻辑模型以 Task 为聚合（email、prompt、html、**chat 时间线**、source、updated_at、meta 等）。
+- **选择**：Turso（libSQL）；逻辑模型以 Task 为聚合（email、prompt、html、**versions**、currentVersionN、**chat 时间线**、source、updated_at、meta 等）。
 - **凭证**：`TURSO_DATABASE_URL` + `TURSO_AUTH_TOKEN`，仅环境变量 / `.env.local`。
-- **Artifact + 对话**：登录用户在项目内生成成功后，**同一次覆盖写** `html` 与 `chat_json`（原子一致）；失败不落库。
-- **chat 内容**：仅 `user` / `assistant` / `version`；**不存**流式思考过程。`prompt` 字段仅为「最近一轮需求摘要」，完整历史以 `chat_json` 为准。
-- **裁剪**：服务端规范化时最多保留最近约 120 条；单条 user/assistant 文本过长截断。
-- **列表**：Task 列表不返回完整 `html` / `chat`（减小体积）；打开单条时还原对话与预览。
+- **Artifact + 版本 + 对话**：登录用户生成成功后，**同一次写入**更新 `html`（= Current Version）、`versions_json`、`current_version_n` 与 `chat_json`；失败不落库。
+- **chat 内容**：`user` / `assistant` / `version` / `system`；**不存**流式思考过程。版本卡文案 = `版本 N · {模型改动短摘要}`（失败回退 Prompt 截断）。
+- **导出**：前端 Blob 下载 Current Version（访客为当次会话 HTML）；非分享直链。
+- **裁剪**：chat 约 120 条；versions 最多 20 份 HTML 快照。
+- **列表**：不返回完整 `html` / `chat` / `versions`；打开单条时还原。
 - **不做**：分享直链、公开匿名可枚举的「全世界作品墙」（列表按邮箱隔离）。
 
 ### 6. 预览：iframe sandbox
@@ -79,7 +83,7 @@
 
 - 2 路并行 + 用户择优；**无自动打分**；Score 不进模型。
 - 核心闭环不稳则**整段砍**。
-- 择优后写入当前 Task（覆盖）。
+- 择优后写入当前 Task，落成**一个**新 Version（仅 Winner）。
 
 ### 8. 部署与文档
 

@@ -1,6 +1,11 @@
 import { createClient, type Client } from '@libsql/client'
 import { randomUUID } from 'node:crypto'
 import type { GenerationMode, TaskSource } from '../../shared/constants.js'
+import {
+  migrateVersionsIfNeeded,
+  normalizeVersions,
+  type TaskVersionSnapshot,
+} from '../../shared/versions.js'
 
 /** 与前端工作区对齐的可持久化对话条目 */
 export type PersistedChatItem =
@@ -8,6 +13,7 @@ export type PersistedChatItem =
   | { kind: 'assistant'; id: string; text: string }
   | { kind: 'version'; id: string; n: number; label: string }
   | { kind: 'error'; id: string; text: string }
+  | { kind: 'system'; id: string; text: string }
 
 export type TaskRecord = {
   id: string
@@ -15,7 +21,11 @@ export type TaskRecord = {
   title: string
   prompt: string
   html: string
-  /** 对话时间线 JSON（覆盖写） */
+  /** 线性 Version 快照（含历史 HTML） */
+  versions: TaskVersionSnapshot[]
+  /** 当前 Version 序号；0 表示尚无 */
+  currentVersionN: number
+  /** 对话时间线 JSON */
   chat: PersistedChatItem[]
   generationMode: GenerationMode
   source: TaskSource
@@ -44,7 +54,6 @@ export function isTursoConfigured(): boolean {
  * 用例切换 env / 换 :memory: 库后必须调用，避免连到旧连接。
  */
 export function resetTasksClientForTests(): void {
-  // Windows 下不 close 再删 file DB 会 EBUSY；:memory: 也需释放连接
   if (client && !client.closed) {
     client.close()
   }
@@ -61,13 +70,12 @@ function requireClient(): Client {
   }
   if (!client) {
     const { url, authToken } = getTursoEnv()
-    // authToken 对远程 libsql 必需；本地 file: 测试库也会传入占位值
     client = createClient({ url, authToken })
   }
   return client
 }
 
-/** 建表 + 轻量迁移：补 chat_json 列 */
+/** 建表 + 轻量迁移：chat_json / versions_json / current_version_n */
 async function ensureSchema(): Promise<void> {
   if (schemaReady) return
   const db = requireClient()
@@ -79,19 +87,25 @@ async function ensureSchema(): Promise<void> {
       prompt TEXT NOT NULL,
       html TEXT NOT NULL,
       chat_json TEXT NOT NULL DEFAULT '[]',
+      versions_json TEXT NOT NULL DEFAULT '[]',
+      current_version_n INTEGER NOT NULL DEFAULT 0,
       generation_mode TEXT NOT NULL,
       source TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )
   `)
-  // 步骤：旧库无 chat_json 时补列（已存在则忽略）
-  try {
-    await db.execute(
-      `ALTER TABLE tasks ADD COLUMN chat_json TEXT NOT NULL DEFAULT '[]'`,
-    )
-  } catch {
-    /* duplicate column — ok */
+  // 步骤：旧库逐列补齐（已存在则忽略）
+  for (const sql of [
+    `ALTER TABLE tasks ADD COLUMN chat_json TEXT NOT NULL DEFAULT '[]'`,
+    `ALTER TABLE tasks ADD COLUMN versions_json TEXT NOT NULL DEFAULT '[]'`,
+    `ALTER TABLE tasks ADD COLUMN current_version_n INTEGER NOT NULL DEFAULT 0`,
+  ]) {
+    try {
+      await db.execute(sql)
+    } catch {
+      /* duplicate column — ok */
+    }
   }
   await db.execute(
     `CREATE INDEX IF NOT EXISTS idx_tasks_email ON tasks(email)`,
@@ -104,12 +118,11 @@ function normalizeEmail(email: string): string {
 }
 
 function assertNoSecrets(payload: Record<string, unknown>) {
-  // 防御：持久化路径不得夹带密钥字段
   const forbidden = [
     'apiKey',
     'api_key',
     'BAILIAN_API_KEY',
-    'aliQwen-api', // 本地系统环境变量名，同样禁止入库
+    'aliQwen-api',
     'authToken',
     'TURSO_AUTH_TOKEN',
     'score',
@@ -130,9 +143,13 @@ export function normalizeChat(raw: unknown): PersistedChatItem[] {
     const o = item as Record<string, unknown>
     const kind = o.kind
     const id = typeof o.id === 'string' && o.id ? o.id : randomUUID()
-    if (kind === 'user' || kind === 'assistant' || kind === 'error') {
+    if (
+      kind === 'user' ||
+      kind === 'assistant' ||
+      kind === 'error' ||
+      kind === 'system'
+    ) {
       const text = typeof o.text === 'string' ? o.text : ''
-      // 步骤：单条过长则截断，防止异常 payload
       out.push({
         kind,
         id,
@@ -144,7 +161,6 @@ export function normalizeChat(raw: unknown): PersistedChatItem[] {
       out.push({ kind: 'version', id, n, label: label.slice(0, 200) })
     }
   }
-  // 步骤：最多保留最近 120 条，控制行体积
   return out.length > 120 ? out.slice(-120) : out
 }
 
@@ -163,6 +179,8 @@ export async function createTask(input: {
     title: input.title?.trim() || '未命名任务',
     prompt: input.prompt?.trim() || '',
     html: '',
+    versions: [],
+    currentVersionN: 0,
     chat: [],
     generationMode: 'builtin',
     source: 'single',
@@ -173,8 +191,8 @@ export async function createTask(input: {
 
   const db = requireClient()
   await db.execute({
-    sql: `INSERT INTO tasks (id, email, title, prompt, html, chat_json, generation_mode, source, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    sql: `INSERT INTO tasks (id, email, title, prompt, html, chat_json, versions_json, current_version_n, generation_mode, source, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     args: [
       record.id,
       record.email,
@@ -182,6 +200,8 @@ export async function createTask(input: {
       record.prompt,
       record.html,
       JSON.stringify(record.chat),
+      JSON.stringify(record.versions),
+      record.currentVersionN,
       record.generationMode,
       record.source,
       record.createdAt,
@@ -216,10 +236,49 @@ export async function getTask(
     args: [id, normalized],
   })
   if (!rs.rows[0]) return null
-  return rowToTask(rs.rows[0])
+  // 步骤：打开时惰性迁移旧数据（仅有 html、无 versions）
+  const task = rowToTask(rs.rows[0])
+  return persistLazyMigration(task)
 }
 
-/** 覆盖写当前 Artifact + 对话（无版本树） */
+/** 若发生惰性升级则写回 DB，保证下次打开一致 */
+async function persistLazyMigration(task: TaskRecord): Promise<TaskRecord> {
+  const migrated = migrateVersionsIfNeeded({
+    html: task.html,
+    prompt: task.prompt,
+    versions: task.versions,
+    currentVersionN: task.currentVersionN,
+  })
+  const changed =
+    migrated.versions.length !== task.versions.length ||
+    migrated.currentVersionN !== task.currentVersionN ||
+    migrated.html !== task.html
+  if (!changed) return task
+
+  const updated: TaskRecord = {
+    ...task,
+    html: migrated.html,
+    versions: migrated.versions,
+    currentVersionN: migrated.currentVersionN,
+    updatedAt: new Date().toISOString(),
+  }
+  const db = requireClient()
+  await db.execute({
+    sql: `UPDATE tasks SET html = ?, versions_json = ?, current_version_n = ?, updated_at = ?
+          WHERE id = ? AND email = ?`,
+    args: [
+      updated.html,
+      JSON.stringify(updated.versions),
+      updated.currentVersionN,
+      updated.updatedAt,
+      updated.id,
+      updated.email,
+    ],
+  })
+  return updated
+}
+
+/** 保存当前 Artifact + Version 列表 + 对话 */
 export async function saveTaskArtifact(input: {
   id: string
   email: string
@@ -229,6 +288,8 @@ export async function saveTaskArtifact(input: {
   source?: TaskSource
   title?: string
   chat?: PersistedChatItem[]
+  versions?: TaskVersionSnapshot[]
+  currentVersionN?: number
 }): Promise<TaskRecord> {
   await ensureSchema()
   const existing = await getTask(input.id, input.email)
@@ -237,14 +298,60 @@ export async function saveTaskArtifact(input: {
   const chat =
     input.chat !== undefined ? normalizeChat(input.chat) : existing.chat
 
+  // 步骤：客户端若带 versions 则规范化；否则在现有基础上用 html 兜底迁移
+  let versions: TaskVersionSnapshot[]
+  let currentVersionN: number
+  let html: string
+
+  if (input.versions !== undefined) {
+    currentVersionN =
+      typeof input.currentVersionN === 'number' &&
+      Number.isFinite(input.currentVersionN)
+        ? Math.floor(input.currentVersionN)
+        : existing.currentVersionN
+    versions = normalizeVersions(input.versions, currentVersionN)
+    const synced = migrateVersionsIfNeeded({
+      html: input.html,
+      prompt: input.prompt,
+      versions,
+      currentVersionN,
+    })
+    versions = synced.versions
+    currentVersionN = synced.currentVersionN
+    html = synced.html || input.html
+  } else {
+    const synced = migrateVersionsIfNeeded({
+      html: input.html,
+      prompt: input.prompt,
+      versions: existing.versions,
+      currentVersionN: existing.currentVersionN,
+    })
+    // 步骤：未传 versions 时，用新 html 更新 Current 快照内容（兼容旧客户端）
+    if (synced.versions.length > 0 && synced.currentVersionN >= 1) {
+      versions = synced.versions.map((v) =>
+        v.n === synced.currentVersionN
+          ? { ...v, html: input.html, promptSummary: v.promptSummary }
+          : v,
+      )
+      currentVersionN = synced.currentVersionN
+      html = input.html
+    } else {
+      versions = synced.versions
+      currentVersionN = synced.currentVersionN
+      html = input.html
+    }
+    versions = normalizeVersions(versions, currentVersionN)
+  }
+
   const updated: TaskRecord = {
     ...existing,
     prompt: input.prompt,
-    html: input.html,
+    html,
+    versions,
+    currentVersionN,
     chat,
     generationMode: input.generationMode,
     source: input.source ?? existing.source,
-    // 步骤：未显式传 title 时保留原标题，避免被本轮 prompt 覆盖
     title:
       input.title !== undefined
         ? input.title.trim() || existing.title || truncate(input.prompt, 40)
@@ -255,13 +362,15 @@ export async function saveTaskArtifact(input: {
 
   const db = requireClient()
   await db.execute({
-    sql: `UPDATE tasks SET title = ?, prompt = ?, html = ?, chat_json = ?, generation_mode = ?, source = ?, updated_at = ?
+    sql: `UPDATE tasks SET title = ?, prompt = ?, html = ?, chat_json = ?, versions_json = ?, current_version_n = ?, generation_mode = ?, source = ?, updated_at = ?
           WHERE id = ? AND email = ?`,
     args: [
       updated.title,
       updated.prompt,
       updated.html,
       JSON.stringify(updated.chat),
+      JSON.stringify(updated.versions),
+      updated.currentVersionN,
       updated.generationMode,
       updated.source,
       updated.updatedAt,
@@ -301,12 +410,30 @@ function rowToTask(row: Record<string, unknown>): TaskRecord {
   } catch {
     chat = []
   }
+
+  let versionsRaw: unknown = []
+  try {
+    const raw = row.versions_json
+    versionsRaw =
+      typeof raw === 'string' ? JSON.parse(raw || '[]') : raw ?? []
+  } catch {
+    versionsRaw = []
+  }
+
+  const currentVersionNRaw = Number(row.current_version_n ?? 0)
+  const currentVersionN = Number.isFinite(currentVersionNRaw)
+    ? Math.floor(currentVersionNRaw)
+    : 0
+  const versions = normalizeVersions(versionsRaw, currentVersionN)
+
   return {
     id: String(row.id),
     email: String(row.email),
     title: String(row.title),
     prompt: String(row.prompt),
     html: String(row.html),
+    versions,
+    currentVersionN,
     chat,
     generationMode: String(row.generation_mode) as GenerationMode,
     source: String(row.source) as TaskSource,

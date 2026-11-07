@@ -3,6 +3,7 @@ import type {
   PersistedChatItem,
   TaskDetail,
   TaskSummary,
+  TaskVersionSnapshot,
 } from './types'
 
 export type ChatTurn = { role: 'user' | 'assistant'; content: string }
@@ -239,6 +240,32 @@ export async function openTask(email: string, id: string) {
   return json.task
 }
 
+/**
+ * 请服务端用内置模型为本轮改动写一句短摘要（版本卡）
+ * 网络/模型失败时抛错，由调用方回退 Prompt 截断
+ */
+export async function summarizeVersionChange(input: {
+  prompt: string
+  isIteration?: boolean
+}): Promise<string> {
+  const res = await fetch('/api/summarize-version', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      prompt: input.prompt,
+      isIteration: Boolean(input.isIteration),
+    }),
+  })
+  const json = (await res.json()) as {
+    ok?: boolean
+    summary?: string
+    error?: string
+  }
+  const summary = typeof json.summary === 'string' ? json.summary.trim() : ''
+  if (summary) return summary
+  throw new Error(json.error || '摘要失败')
+}
+
 export async function saveTask(input: {
   id: string
   email: string
@@ -249,6 +276,9 @@ export async function saveTask(input: {
   title?: string
   /** 步骤：与 HTML 一并覆盖保存的对话时间线 */
   chat?: PersistedChatItem[]
+  /** 线性 Version 快照 */
+  versions?: TaskVersionSnapshot[]
+  currentVersionN?: number
 }) {
   const res = await fetch(`/api/tasks/${encodeURIComponent(input.id)}`, {
     method: 'PUT',

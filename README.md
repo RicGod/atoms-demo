@@ -12,7 +12,7 @@ OpenSpec change：`mini-atoms-demo`。
 | --- | --- | --- |
 | LLM Key | 浏览器 BYOK 为主 | **服务端内置**百炼 Key（本地 `aliQwen-api` / 兼容 `BAILIAN_API_KEY`）交卷；浏览器自配仅为降级（登录后可配） |
 | 身份 | 视对方实现 | 邮箱登记（无验证码 / 无 OIDC） |
-| 持久化 | 视对方实现 | **Turso**，按邮箱隔离的 Task（对外称「项目」）；覆盖写当前 Artifact |
+| 持久化 | 视对方实现 | **Turso**，按邮箱隔离的 Task（对外称「项目」）；线性 Version 快照 + Current 指针 |
 | 生成角标 | — | **内置 / 自配 / mock** |
 | 迭代 | — | 多轮 Prompt + 历史摘要 + 当前 HTML → 整页覆盖 |
 | 赛马 | — | 仅登录；固定两路不同内置模型；人择 Winner；`source=horse-race` |
@@ -21,7 +21,7 @@ OpenSpec change：`mini-atoms-demo`。
 
 - 分享直链（不做公开作品直链产品路径）
 - OIDC / 注册验证码
-- 完整版本树（「版本 N」仅装饰，不可回看；Task 内覆盖写）
+- Git 式分支版本树（仅 Task 内线性快照，上限 20，可回滚与导出当前版）
 - Score / 自动裁判（Score 不进模型与持久化）
 - 真多文件工程 / 真文件树 / AST 补丁
 - 访客赛马

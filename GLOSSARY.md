@@ -19,40 +19,56 @@ _Avoid_: Session, Workspace, Document（过宽或与 Artifact 混淆）
 _Avoid_: Project folder, Workspace container, 多 Task 文件夹
 
 **Creation**:
-Task 的当前已保存产物之语义别名（最近一轮 Prompt 摘要 + 选定 Artifact + 对话时间线等），**不是**独立于 Task 的第二套持久化聚合。回看与列表以 Task 为准。
-_Avoid_: 把 Creation 当作与 Task 并列的唯一 DB 聚合；Version tree
+Task 的当前已保存产物之语义别名（最近一轮 Prompt 摘要 + **当前 Version** 对应的 Artifact + 对话时间线等），**不是**独立于 Task 的第二套持久化聚合。回看与列表以 Task 为准。
+_Avoid_: 把 Creation 当作与 Task 并列的唯一 DB 聚合
 
 ### 输入与产物
 
 **Prompt**:
-用户提交的一句自然语言描述，是一次生成或迭代流程的输入意图。持久化时 Task 上的 Prompt 字段仅表示**最近一轮**需求摘要；完整发言历史见 Chat Timeline。
+用户提交的一句自然语言描述，是一次生成或迭代流程的输入意图。持久化时 Task 上的 Prompt 字段仅表示**最近一轮**需求摘要；完整发言历史见 Chat Timeline。Version 卡片上的「当轮修改内容」优先取自**模型另写的一句短摘要**；摘要失败时回退为该轮 Prompt 截断。
 _Avoid_: Idea, Query, Instruction, 想法（口语可说「想法」，书面与模型统一用 Prompt）
 
 **Artifact**:
-一次生成流程产出的、可独立运行的**单文件 HTML 文档**（样式与脚本自包含，一份文件即可在浏览器里打开跑）。Task 内只保留当前选定的一份；每次成功保存会**用新文档整体替换**旧文档（覆盖写）。MVP **不**引入多文件包 / 真文件树。
+一次生成流程产出的、可独立运行的**单文件 HTML 文档**（样式与脚本自包含，一份文件即可在浏览器里打开跑）。每个 **Version** 持有一份完整 Artifact 快照；Task 的「当前 Artifact」= **当前 Version** 那份。MVP **不**引入多文件包 / 真文件树。
 _Avoid_: Page, App, Site, Document, 页面（泛指）；ArtifactBundle（多文件包，Post-MVP）
 
 ### 会话呈现
 
 **Preview**:
-当前会话中用于展示某一 Artifact 的即时预览视图；本身不是持久化实体。未登记邮箱也可 Preview，但不得持久化。
+当前会话中用于展示**当前 Version** 之 Artifact 的即时预览视图；本身不是持久化实体。未登记邮箱也可 Preview，但不得持久化、无 Version 历史。
 _Avoid_: Render, Sandbox view, Demo（与「产品演示」混淆时）
 
 **Workspace（工作区）**:
-打开项目后的界面编排口语：左对话区 + 右 Preview / 代码切换。**不是**领域实体，不落库。
+打开项目后的界面编排口语：左对话区 + 右 Preview / 代码切换。**不是**领域实体，不落库。代码页可浏览 Version 历史并触发回滚。
 _Avoid_: 把 Workspace 写成第二套持久化聚合
 
 **Chat Timeline（对话时间线）**:
-Task 内可持久化的对话序列，条目为用户发言、助手回复，以及 Version 里程碑标记。与当前 Artifact **同一次成功保存时一并覆盖写**；不含流式思考过程。
+Task 内可持久化的对话序列，条目为用户发言、助手回复、Version 里程碑，以及 **System Note（系统说明）**。回滚**不改写、不删除**已有时间线条目；回滚成功后追加一条 System Note。不含流式思考过程。
 _Avoid_: chat_json（实现列名）, Conversation（易与「一次聊天会话」混淆时）, History（过宽）
 
+**System Note（系统说明）**:
+对话时间线上的非对话条目，用于记录工作区重要状态变更（例如「已回滚到版本 K」）。可持久化；不是用户 Prompt，也不送给模型当 messages。
+_Avoid_: assistant 冒充系统消息；Toast-only（仅闪一下不落时间线）
+
 **Regenerate / 对话式迭代**:
-在同一项目内多轮 Prompt：结合对话历史与**当前 Artifact**，按本轮需求做**针对性、最小必要**的修改；模型仍交付一份**完整可运行的单文件 HTML**，保存时覆盖 Task 内当前 Artifact（不是 Diff 补丁实体，也不是从零抛开旧页重做无关内容）。工作区迭代呈现 MAY 用「相对上一版」的变更对照（增删高亮、折叠未改行）以降低整页重写感；该对照**仅 Workspace 呈现、不持久化**，不是领域实体。
-_Avoid_: Retry（仅表示网络重试时）, Refresh（仅表示刷新页面时）；AST 补丁、真版本树回看；把 Diff/变更对照当成 Artifact 或落库对象
+在同一项目内多轮 Prompt：结合对话历史与**当前 Artifact**，按本轮需求做**针对性、最小必要**的修改；模型仍交付一份**完整可运行的单文件 HTML**；成功后追加新 **Version** 快照并成为当前 Version。工作区迭代呈现 MAY 用「相对上一版」的变更对照（增删高亮、折叠未改行）；该对照**仅 Workspace 呈现、不持久化**，不是领域实体。
+_Avoid_: Retry（仅表示网络重试时）, Refresh（仅表示刷新页面时）；AST 补丁；把 Diff/变更对照当成 Artifact 或落库对象
 
 **Version（版本 N）**:
-对话时间线上的里程碑标记（如「版本 1」「本轮生成完成」）；**可随 Chat Timeline 持久化**，便于回看聊过几轮。仍 **不可** 点击恢复历史 Artifact，无 Version 聚合与版本树。
-_Avoid_: Version tree, Checkpoint restore
+Task 内一次成功生成/择优后的**可恢复 Artifact 快照**（完整单文件 HTML + 序号 N + 本轮改动短摘要）。序号在 Task 内单调递增、**不分支**（回滚后再生成仍分配下一个 N）。对话时间线同步出现对应里程碑卡片（文案形如「版本 N · {改动短摘要}」）。**仅登录且已打开的 Task** 拥有可浏览/回滚的 Version 历史；访客可有装饰卡片语义，但不落历史快照。Task 对快照份数有上限；超出时可丢弃最旧快照的 HTML（时间线卡片仍可保留）。
+_Avoid_: 把 Version 仅当作不可恢复的装饰标记；Git 式分支版本树；Checkpoint（实现隐喻）
+
+**Current Version（当前版本）**:
+Task 上指向某一 Version 的选择；Preview、代码默认展示、以及导出均针对当前 Version 的 Artifact。回滚 = 把当前 Version 改到历史某一 N，不删除其它 Version。
+_Avoid_: HEAD, tip（Git 隐喻外溢时）
+
+**Rollback（回滚）**:
+将 Current Version 切换到 Task 内已有的某一历史 Version；只改当前指针与当前 Artifact，不新建生成轮次；成功后在 Chat Timeline 追加一条 System Note。之后若再迭代，以该 Version 的 Artifact 为基底并线性追加新 N。
+_Avoid_: Undo（易与编辑器撤销混淆）, Revert commit
+
+**Export（导出）**:
+把当前可下载的 Artifact 存为本地单文件（文件名可用「项目标题-v{N}.html」）。登录用户导出 **Current Version**；访客导出当次会话内存中的那份 HTML（不落库、无 Version 历史）。不是分享直链，不是领域聚合。
+_Avoid_: Publish, Share link, 公开作品页
 
 ### 赛马
 
@@ -65,7 +81,7 @@ Horse Race 中一路生成得到的 Artifact（尚未被选为优胜）。
 _Avoid_: Variant, Option, Runner（口语可说 runner-up，模型用 Candidate）
 
 **Winner**:
-用户在 Candidate 中选定的那一份 Artifact；选定后成为当前 Preview，并可在已打开的 Task 中覆盖保存（source = horse-race）。
+用户在 Candidate 中选定的那一份 Artifact；选定后成为当前 Preview，并在已打开的 Task 中落成新的 **Version**（source = horse-race）。
 _Avoid_: Score winner, Champion, Best（暗示自动打分时）
 
 ### 生成来源（元数据语义）
@@ -87,3 +103,7 @@ _Avoid_: Rating, Judge score（作为领域概念引入时）
 **Guest（访客）**:
 未登记邮箱的使用者。可单路生成 + Preview；不落库；无项目列表；无赛马；无自配模型配置入口。
 _Avoid_: GuestSession（不引入为领域实体）
+
+**Preset（预置示例）**:
+一份事先写好的单文件 HTML，访客可把它当作当前 Preview 打开。它不是 Task，也不是 Project。
+_Avoid_: 项目, Demo Project, 示例项目

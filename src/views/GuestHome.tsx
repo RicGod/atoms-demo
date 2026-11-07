@@ -14,6 +14,9 @@ export function GuestHome(props: {
   onGenerate: () => void
   onLogin: () => void
   onLoadPreset: (path: string) => void
+  /** 是否有可恢复的访客工作区（返回首页后可再进入） */
+  canResumeWorkspace?: boolean
+  onResumeWorkspace?: () => void
 }) {
   /** 步骤：Enter 发送（Shift+Enter 换行）；空内容或生成中不触发 */
   const trySend = () => {
@@ -121,6 +124,24 @@ export function GuestHome(props: {
             {props.statusText}
           </p>
         </div>
+
+        {/* 步骤：返回首页后仍可回到刚才的生成页（会话内存未清） */}
+        {props.canResumeWorkspace && props.onResumeWorkspace ? (
+          <div className="guest-resume-bar">
+            <p className="guest-resume-text">
+              {props.streaming
+                ? '刚才的页面还在生成中，可返回继续查看'
+                : '你有一份未保存的访客预览，可继续编辑'}
+            </p>
+            <button
+              type="button"
+              className="btn"
+              onClick={props.onResumeWorkspace}
+            >
+              {props.streaming ? '返回生成中的页面' : '继续刚才的预览'}
+            </button>
+          </div>
+        ) : null}
 
         {/* 步骤：无演示区大标题；示例以低调 chips 呈现（参考站风格） */}
         <div className="preset-chips" aria-label="示例">

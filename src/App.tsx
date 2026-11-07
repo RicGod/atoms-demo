@@ -9,6 +9,7 @@ import {
   openTask,
   raceBuiltin,
   saveTask,
+  summarizeVersionChange,
   type RaceCandidate,
 } from './lib/api'
 import {
@@ -31,7 +32,15 @@ import {
   type ByokStore,
   type GenerationMode,
   type TaskSummary,
+  type TaskVersionSnapshot,
 } from './lib/types'
+import {
+  appendVersionSnapshot,
+  exportFilename,
+  migrateVersionsIfNeeded,
+  sanitizeChangeSummary,
+  versionCardLabel,
+} from '../shared/versions'
 import { GuestHome } from './views/GuestHome'
 import { LoginView } from './views/LoginView'
 import { ProjectList } from './views/ProjectList'
@@ -87,8 +96,11 @@ export default function App() {
   const [chat, setChat] = useState<ChatItem[]>([])
   const [draft, setDraft] = useState('')
   const [pane, setPane] = useState<'preview' | 'code'>('preview')
-  // 版本号仅驱动装饰「版本 N」卡片，不用于回看
-  const [, setVersionN] = useState(0)
+  /** Task 内 Version 快照（登录落库；访客仅会话内存） */
+  const [versions, setVersions] = useState<TaskVersionSnapshot[]>([])
+  const [currentVersionN, setCurrentVersionN] = useState(0)
+  /** 代码页正在浏览的版本；null = 跟 Current（可显示 diff） */
+  const [viewingVersionN, setViewingVersionN] = useState<number | null>(null)
   const [raceCandidates, setRaceCandidates] = useState<RaceCandidate[] | null>(
     null,
   )
@@ -246,14 +258,34 @@ export default function App() {
     })
   }
 
+  /** 步骤：退出登录时清空工作区会话，避免登录对话泄漏到访客首页/工作区 */
+  const clearWorkspaceSession = () => {
+    setGuestSession(false)
+    setActiveTaskId(null)
+    setChat([])
+    setHtml('')
+    setDraft('')
+    setVersions([])
+    setCurrentVersionN(0)
+    setViewingVersionN(null)
+    setCodeDiff(null)
+    setRaceCandidates(null)
+    raceChatAtSendRef.current = null
+    setStreamThinking('')
+    setStreamStage('')
+    setIterationStreaming(false)
+    setStreaming(false)
+    setRacing(false)
+    setPane('preview')
+    // 步骤：首页输入框与登录态共用 prompt，必须恢复访客默认，否则会带上最后一轮需求
+    setPrompt('做一个可点击的霓虹风格打卡按钮')
+  }
+
   const onLogout = () => {
     setEmail('')
     localStorage.removeItem(EMAIL_STORAGE_KEY)
-    setActiveTaskId(null)
     setTasks([])
-    setGuestSession(false)
-    setChat([])
-    setHtml('')
+    clearWorkspaceSession()
     setView('home')
     setStatus({ kind: 'info', text: '已退出，可继续以访客体验' })
   }
@@ -278,7 +310,9 @@ export default function App() {
     setGuestSession(true)
     setActiveTaskId(null)
     setRaceCandidates(null)
-    setVersionN(0)
+    setVersions([])
+    setCurrentVersionN(0)
+    setViewingVersionN(null)
     setDraft('')
     setHtml('')
     setView('workspace')
@@ -314,7 +348,7 @@ export default function App() {
         },
       })
 
-      applySuccess(userText, fullHtml, 'mock', 'single', [userMsg])
+      await applySuccess(userText, fullHtml, 'mock', 'single', [userMsg])
       if (softFallback) {
         setStatus({
           kind: 'info',
@@ -354,25 +388,34 @@ export default function App() {
     existingPrompt?: string
     /** 步骤：从库恢复的对话；有则优先生效 */
     existingChat?: ChatItem[]
+    existingVersions?: TaskVersionSnapshot[]
+    existingCurrentVersionN?: number
   }) => {
     setGuestSession(opts.guest)
     setActiveTaskId(opts.taskId)
     setRaceCandidates(null)
     setCodeDiff(null)
+    setViewingVersionN(null)
     setPane('preview')
+
+    // 步骤：惰性对齐 Version 快照（旧 Task 仅有 html 时收成 v1）
+    const migrated = migrateVersionsIfNeeded({
+      html: opts.existingHtml || '',
+      prompt: opts.existingPrompt || opts.titleHint || '当前保存版本',
+      versions: opts.existingVersions || [],
+      currentVersionN: opts.existingCurrentVersionN || 0,
+    })
+    setVersions(migrated.versions)
+    setCurrentVersionN(migrated.currentVersionN)
+
     if (opts.existingChat && opts.existingChat.length > 0) {
-      // 步骤：恢复完整对话时间线 + HTML
-      setHtml(opts.existingHtml || '')
+      setHtml(migrated.html || opts.existingHtml || '')
       setChat(opts.existingChat)
-      const maxVer = opts.existingChat.reduce(
-        (m, c) => (c.kind === 'version' ? Math.max(m, c.n) : m),
-        0,
-      )
-      setVersionN(maxVer)
       setDraft('')
-    } else if (opts.existingHtml) {
-      // 步骤：旧项目无 chat 时给一条引导，避免空白
-      setHtml(opts.existingHtml)
+    } else if (migrated.html || opts.existingHtml) {
+      const n = migrated.currentVersionN || 1
+      const summaryPrompt = opts.existingPrompt || '当前保存版本'
+      setHtml(migrated.html || opts.existingHtml || '')
       setChat([
         {
           kind: 'assistant',
@@ -382,16 +425,16 @@ export default function App() {
         {
           kind: 'version',
           id: nid('v'),
-          n: 1,
-          label: '当前保存版本',
+          n,
+          label: versionCardLabel(n, summaryPrompt),
         },
       ])
-      setVersionN(1)
       if (opts.existingPrompt) setDraft('')
     } else {
       setHtml('')
       setChat([])
-      setVersionN(0)
+      setVersions([])
+      setCurrentVersionN(0)
       if (opts.titleHint) setDraft(opts.titleHint)
     }
     setView('workspace')
@@ -466,7 +509,7 @@ export default function App() {
           },
         })
         if (result.ok) {
-          applySuccess(
+          await applySuccess(
             p,
             result.html,
             result.mode,
@@ -505,7 +548,7 @@ export default function App() {
           },
         })
         if (result.ok) {
-          applySuccess(
+          await applySuccess(
             p,
             result.html,
             'byok',
@@ -544,7 +587,7 @@ export default function App() {
       })
 
       if (result.ok) {
-        applySuccess(
+        await applySuccess(
           p,
           result.html,
           result.mode,
@@ -575,10 +618,10 @@ export default function App() {
   }
 
   /**
-   * 生成成功：更新预览，并基于「发送时对话快照」追加 assistant/version 后落库
+   * 生成成功：先更新预览，再向模型要一句改动短摘要，写入版本卡后落库
    * @param chatAtSend 发送瞬间的完整对话（必须已含本轮 user），禁止再从可能被清空的 state 推导
    */
-  const applySuccess = (
+  const applySuccess = async (
     userPrompt: string,
     nextHtml: string,
     nextMode: GenerationMode,
@@ -591,11 +634,40 @@ export default function App() {
     setPrompt(userPrompt)
     setStreamThinking('')
     setStreamStage('')
-    const maxVer = chatAtSend.reduce(
-      (m, c) => (c.kind === 'version' ? Math.max(m, c.n) : m),
-      0,
-    )
-    const nextVer = maxVer + 1
+    setPane('preview')
+
+    const hadBase = Boolean(previousHtml?.trim())
+    if (hadBase && previousHtml !== nextHtml) {
+      setCodeDiff(collapseUnchanged(diffLines(previousHtml!, nextHtml)))
+    } else {
+      setCodeDiff(null)
+    }
+
+    // 步骤：mock/演示不额外打模型；其余请求一句短摘要，失败回退 Prompt 截断
+    let changeSummary = sanitizeChangeSummary('', userPrompt)
+    if (nextMode !== 'mock') {
+      setStatus({ kind: 'info', text: '正在概括本轮改动…' })
+      try {
+        changeSummary = sanitizeChangeSummary(
+          await summarizeVersionChange({
+            prompt: userPrompt,
+            isIteration: hadBase,
+          }),
+          userPrompt,
+        )
+      } catch {
+        changeSummary = sanitizeChangeSummary('', userPrompt)
+      }
+    }
+
+    // 步骤：线性追加 Version 快照（与对话卡序号一致）
+    const appended = appendVersionSnapshot({
+      versions,
+      prompt: userPrompt,
+      html: nextHtml,
+      changeSummary,
+    })
+    const nextVer = appended.currentVersionN
     const nextChat: ChatItem[] = [
       ...chatAtSend,
       {
@@ -612,42 +684,49 @@ export default function App() {
         kind: 'version',
         id: nid('v'),
         n: nextVer,
-        label: source === 'horse-race' ? '赛马择优完成' : '本轮生成完成',
+        label: versionCardLabel(nextVer, changeSummary),
       },
     ]
-    setVersionN(nextVer)
+    setVersions(appended.versions)
+    setCurrentVersionN(nextVer)
+    setViewingVersionN(null)
     setChat(nextChat)
     // 步骤：副作用放在 setState 外，避免 Strict Mode 双调 updater 丢消息 / 重复保存
     if (signedIn && activeTaskId) {
-      void autoSave(userPrompt, nextHtml, nextMode, source, nextChat)
+      void autoSave(
+        userPrompt,
+        nextHtml,
+        nextMode,
+        source,
+        nextChat,
+        appended.versions,
+        nextVer,
+      )
     }
 
-    const hadBase = Boolean(previousHtml?.trim())
     if (hadBase && previousHtml !== nextHtml) {
-      // 步骤：迭代成功 → 备好折叠 diff（代码 Tab 可看）；默认仍回预览看效果
-      setCodeDiff(collapseUnchanged(diffLines(previousHtml!, nextHtml)))
       setStatus({
         kind: 'info',
         text: '已按你的要求更新预览；需要对照改动时可打开「代码」查看变更',
       })
     } else {
-      setCodeDiff(null)
       setStatus({
         kind: 'info',
         text:
           source === 'horse-race' ? '已选定这一版' : doneStatusLabel(nextMode),
       })
     }
-    setPane('preview')
   }
 
-  /** 步骤：生成成功后自动覆盖写回当前项目（HTML + 对话） */
+  /** 步骤：生成成功后自动写回当前项目（HTML + versions + 对话） */
   const autoSave = async (
     userPrompt: string,
     nextHtml: string,
     nextMode: GenerationMode,
     source: 'single' | 'horse-race',
     nextChat: ChatItem[],
+    nextVersions: TaskVersionSnapshot[],
+    nextCurrentN: number,
   ) => {
     if (!activeTaskId) return
     try {
@@ -659,15 +738,76 @@ export default function App() {
         generationMode: nextMode,
         source,
         chat: nextChat,
+        versions: nextVersions,
+        currentVersionN: nextCurrentN,
       })
       await refreshTasks(email)
-      setStatus({ kind: 'info', text: '已自动保存代码与对话' })
+      setStatus({ kind: 'info', text: '已自动保存代码、版本与对话' })
     } catch (e) {
       // 步骤：自动保存失败也进对话区，方便用户看到
       const msg = e instanceof Error ? e.message : String(e)
       setChat((prev) => chatWithError(prev, `自动保存失败：${msg}`))
       setStatus({ kind: 'idle', text: '' })
     }
+  }
+
+  /** 代码页：浏览历史源码（不改 Current） */
+  const onViewVersion = (n: number) => {
+    setViewingVersionN(n)
+    setCodeDiff(null)
+    setPane('code')
+  }
+
+  /** 显式回滚到历史 Version */
+  const onRollbackVersion = (n: number) => {
+    const target = versions.find((v) => v.n === n)
+    if (!target) return
+    setCurrentVersionN(n)
+    setHtml(target.html)
+    setViewingVersionN(null)
+    setCodeDiff(null)
+    const note: ChatItem = {
+      kind: 'system',
+      id: nid('s'),
+      text: `已回滚到版本 ${n}`,
+    }
+    const nextChat = [...chat, note]
+    setChat(nextChat)
+    setPane('preview')
+    if (signedIn && activeTaskId) {
+      void autoSave(
+        prompt || target.promptSummary,
+        target.html,
+        activeProfile && isBuiltinProfile(activeProfile)
+          ? 'builtin'
+          : byok
+            ? 'byok'
+            : 'builtin',
+        'single',
+        nextChat,
+        versions,
+        n,
+      )
+    }
+    setStatus({ kind: 'info', text: `已回滚到版本 ${n}` })
+  }
+
+  /** 导出当前 Version（或访客当次 HTML）到本机 */
+  const onExportHtml = () => {
+    const body = html?.trim()
+    if (!body) {
+      setStatus({ kind: 'error', text: '暂无可导出的代码' })
+      return
+    }
+    const name = exportFilename(activeTitle, currentVersionN || 1)
+    const blob = new Blob([body], { type: 'text/html;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = name
+    a.click()
+    URL.revokeObjectURL(url)
+    setStatus({ kind: 'info', text: `已导出 ${name}` })
   }
 
   /** 访客从首页发起：进入临时工作区再生成 */
@@ -683,7 +823,9 @@ export default function App() {
     setRaceCandidates(null)
     setPane('preview')
     setHtml('')
-    setVersionN(0)
+    setVersions([])
+    setCurrentVersionN(0)
+    setViewingVersionN(null)
     setDraft('')
     setView('workspace')
     await runGenerateFromHome(p)
@@ -710,26 +852,7 @@ export default function App() {
         },
       })
       if (result.ok) {
-        setHtml(result.html)
-        setVersionN(1)
-        setStreamThinking('')
-        setStreamStage('')
-        setChat([
-          userMsg,
-          {
-            kind: 'assistant',
-            id: nid('a'),
-            text: friendlyDone('single', true, p, [userMsg]),
-          },
-          {
-            kind: 'version',
-            id: nid('v'),
-            n: 1,
-            label: '本轮生成完成',
-          },
-        ])
-        setStatus({ kind: 'info', text: doneStatusLabel(result.mode) })
-        setPane('preview')
+        await applySuccess(p, result.html, result.mode, 'single', [userMsg])
         return
       }
       // 步骤：访客失败进对话；不再随机套预设
@@ -811,7 +934,8 @@ export default function App() {
     setRaceCandidates(null)
     const baseline = raceChatAtSendRef.current ?? chat
     const prev = html || undefined
-    applySuccess(
+    // 步骤：择优后同样要一句改动摘要再写版本卡
+    void applySuccess(
       draft.trim() || prompt,
       c.html,
       c.mode,
@@ -866,8 +990,10 @@ export default function App() {
         taskId: task.id,
         existingHtml: task.html || undefined,
         existingPrompt: task.prompt,
-        // 步骤：还原服务端持久化的对话
+        // 步骤：还原服务端持久化的对话与 Version 快照
         existingChat: Array.isArray(task.chat) ? task.chat : [],
+        existingVersions: Array.isArray(task.versions) ? task.versions : [],
+        existingCurrentVersionN: task.currentVersionN || 0,
       })
       if (task.prompt) setPrompt(task.prompt)
       setStatus({ kind: 'info', text: `已打开项目：${task.title}` })
@@ -928,6 +1054,16 @@ export default function App() {
             setView('login')
           }}
           onLoadPreset={(path) => void loadPreset(path)}
+          // 步骤：访客返回首页不丢会话，提供再进入工作区入口
+          canResumeWorkspace={
+            !signedIn &&
+            guestSession &&
+            (Boolean(html.trim()) || chat.length > 0 || streaming)
+          }
+          onResumeWorkspace={() => {
+            setGuestSession(true)
+            setView('workspace')
+          }}
         />
       ) : null}
 
@@ -975,6 +1111,12 @@ export default function App() {
           iterationStreaming={iterationStreaming}
           html={html}
           codeDiff={codeDiff}
+          versions={versions}
+          currentVersionN={currentVersionN}
+          viewingVersionN={viewingVersionN}
+          onViewVersion={onViewVersion}
+          onRollbackVersion={onRollbackVersion}
+          onExportHtml={onExportHtml}
           model={model}
           onModelChange={setModel}
           preferByok={preferByok}
@@ -997,10 +1139,18 @@ export default function App() {
           onPickWinner={onPickWinner}
           onBack={() => {
             setRaceCandidates(null)
+            // 步骤：访客返回首页时保留 html/chat/versions，便于再进入
             if (signedIn && !guestSession) setView('projects')
-            else setView('home')
+            else {
+              setGuestSession(true)
+              setView('home')
+            }
           }}
           onOpenByok={() => setShowByok(true)}
+          onLogin={() => {
+            setStatus({ kind: 'idle', text: '' })
+            setView('login')
+          }}
         />
       ) : null}
 

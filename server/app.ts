@@ -9,10 +9,12 @@ import {
 import {
   extractHtml,
   streamBuiltinHtml,
+  summarizeVersionChange,
   type ChatTurn,
   type StreamResult,
 } from './lib/bailian.js'
 import { getBailianApiKey, isBailianConfigured } from './lib/bailian-env.js'
+import { sanitizeChangeSummary } from '../shared/versions.js'
 import {
   createTask,
   deleteTask,
@@ -80,6 +82,50 @@ export function createApp(options: CreateAppOptions = {}) {
   // 内置模型列表（不含任何密钥）
   app.get('/api/models', (_req, res) => {
     res.json({ models: [...BUILTIN_MODELS] })
+  })
+
+  /**
+   * 为本轮生成补一句短摘要（版本卡用）
+   * body: { prompt, isIteration? }
+   * 失败时仍 200 + ok:false，前端回退 Prompt 截断
+   */
+  app.post('/api/summarize-version', async (req: Request, res: Response) => {
+    const prompt = String(req.body?.prompt ?? '').trim()
+    if (!prompt) {
+      res.status(400).json({ ok: false, error: 'Prompt 不能为空' })
+      return
+    }
+    const apiKey = getBailianApiKey()
+    if (!apiKey) {
+      res.json({
+        ok: false,
+        error: '未配置百炼 Key',
+        summary: sanitizeChangeSummary('', prompt),
+      })
+      return
+    }
+    try {
+      const result = await summarizeVersionChange({
+        prompt,
+        apiKey,
+        isIteration: Boolean(req.body?.isIteration),
+      })
+      if (result.ok) {
+        res.json({ ok: true, summary: result.summary })
+        return
+      }
+      res.json({
+        ok: false,
+        error: result.message,
+        summary: sanitizeChangeSummary('', prompt),
+      })
+    } catch (e) {
+      res.json({
+        ok: false,
+        error: e instanceof Error ? e.message : String(e),
+        summary: sanitizeChangeSummary('', prompt),
+      })
+    }
   })
 
   /**
@@ -277,13 +323,16 @@ export function createApp(options: CreateAppOptions = {}) {
     }
     try {
       const tasks = await listTasks(email)
-      // 列表不返回完整 html / chat，减小体积
+      // 列表不返回完整 html / chat / versions，减小体积
       res.json({
         ok: true,
-        tasks: tasks.map(({ html: _h, chat: _c, ...rest }) => ({
-          ...rest,
-          hasHtml: Boolean(_h),
-        })),
+        tasks: tasks.map(
+          ({ html: _h, chat: _c, versions: _v, ...rest }) => ({
+            ...rest,
+            hasHtml: Boolean(_h),
+            versionCount: _v.length,
+          }),
+        ),
       })
     } catch (e) {
       res.status(500).json({
@@ -367,8 +416,10 @@ export function createApp(options: CreateAppOptions = {}) {
       req.body?.generationMode ?? 'builtin',
     ) as GenerationMode
     const source = (req.body?.source as TaskSource | undefined) ?? 'single'
-    // 步骤：对话可选；未传则服务端保留原 chat
+    // 步骤：对话 / versions 可选；未传则服务端保留或惰性迁移
     const chat = req.body?.chat
+    const versions = req.body?.versions
+    const currentVersionN = req.body?.currentVersionN
 
     if (!html.trim()) {
       res.status(400).json({ ok: false, error: '缺少可保存的 HTML' })
@@ -385,6 +436,8 @@ export function createApp(options: CreateAppOptions = {}) {
         source,
         title: req.body?.title,
         chat,
+        versions,
+        currentVersionN,
       })
       res.json({ ok: true, task })
     } catch (e) {

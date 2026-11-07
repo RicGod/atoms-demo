@@ -1,7 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ChatTurn, RaceCandidate } from '../lib/api'
 import type { DiffLine } from '../lib/line-diff'
-import { CHAT_WIDTH_STORAGE_KEY, type ByokProfile } from '../lib/types'
+import {
+  CHAT_WIDTH_STORAGE_KEY,
+  type ByokProfile,
+  type TaskVersionSnapshot,
+} from '../lib/types'
 
 const CHAT_WIDTH_MIN = 280
 const CHAT_WIDTH_MAX = 640
@@ -25,6 +29,8 @@ export type ChatItem =
   | { kind: 'version'; id: string; n: number; label: string }
   /** 生成/校验失败：展示在对话流内，不进模型 messages */
   | { kind: 'error'; id: string; text: string }
+  /** 回滚等系统说明：可持久化，不进模型 messages */
+  | { kind: 'system'; id: string; text: string }
 
 type Pane = 'preview' | 'code'
 
@@ -45,6 +51,14 @@ export function Workspace(props: {
   html: string
   /** 迭代后的行 diff；有则代码区优先展示变更，而非整页重播感 */
   codeDiff?: DiffLine[] | null
+  /** Version 快照（登录有历史；访客可有当次） */
+  versions: TaskVersionSnapshot[]
+  currentVersionN: number
+  /** 代码页浏览中的版本；null 表示跟 Current */
+  viewingVersionN: number | null
+  onViewVersion: (n: number) => void
+  onRollbackVersion: (n: number) => void
+  onExportHtml: () => void
   /** 访客可选模型；登录用户忽略（仅自配） */
   model: string
   onModelChange: (m: string) => void
@@ -66,6 +80,8 @@ export function Workspace(props: {
   onPickWinner: (c: RaceCandidate & { ok: true }) => void
   onBack: () => void
   onOpenByok: () => void
+  /** 访客：跳转登录（与首页「登录后解锁」对齐） */
+  onLogin?: () => void
 }) {
   const listRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -73,6 +89,17 @@ export function Workspace(props: {
   const codeRef = useRef<HTMLPreElement>(null)
   const thinkRef = useRef<HTMLPreElement>(null)
   const shellRef = useRef<HTMLDivElement>(null)
+  // 步骤：代码区展示的 HTML——浏览历史版时用快照，否则用 Current
+  const codeHtml = useMemo(() => {
+    if (props.viewingVersionN != null) {
+      const snap = props.versions.find((v) => v.n === props.viewingVersionN)
+      if (snap) return snap.html
+    }
+    return props.html
+  }, [props.viewingVersionN, props.versions, props.html])
+  const showDiff =
+    props.viewingVersionN == null &&
+    Boolean(props.codeDiff && props.codeDiff.length > 0)
   // 步骤：思考区默认展开，用户可手动折叠
   const [thinkOpen, setThinkOpen] = useState(true)
   // 步骤：标记本轮流式是否已强制展开（避免上一轮折叠导致首屏看不到思考）
@@ -224,9 +251,9 @@ export function Workspace(props: {
           ) : null}
           {props.chat.map((item) => {
             if (item.kind === 'version') {
-              // 版本卡片：纯装饰，不可点击回看
+              // 版本里程碑：文案已含「版本 N · 当轮修改」；回看在右侧代码页
               return (
-                <div key={item.id} className="version-card" aria-hidden="true">
+                <div key={item.id} className="version-card">
                   <span className="version-badge">版本 {item.n}</span>
                   <p>{item.label}</p>
                 </div>
@@ -236,6 +263,13 @@ export function Workspace(props: {
               // 步骤：报错进对话流，避免只出现在输入框下方
               return (
                 <div key={item.id} className="bubble error" role="alert">
+                  {item.text}
+                </div>
+              )
+            }
+            if (item.kind === 'system') {
+              return (
+                <div key={item.id} className="bubble system" role="status">
                   {item.text}
                 </div>
               )
@@ -396,7 +430,15 @@ export function Workspace(props: {
             <div className="composer-toolbar">
               <div className="composer-toolbar-left">
                 {props.guest ? (
-                  <span className="hint">访客模式 · 登录后可保存项目</span>
+                  // 步骤：文案与首页 guest-mode-hint 对齐
+                  <button
+                    type="button"
+                    className="guest-mode-hint linkish"
+                    onClick={() => props.onLogin?.()}
+                    title="登录后可保存项目、多轮回看与导出历史版本"
+                  >
+                    当前为访客模式，登录后解锁更多功能
+                  </button>
                 ) : null}
                 {/* 赛马入口：功能暂隐，逻辑保留在 App（onRace 仍传入） */}
                 {false ? (
@@ -524,10 +566,21 @@ export function Workspace(props: {
           <span className="hint file-hint">
             {props.iterationStreaming
               ? '保留上一版 · 后台正在改代码'
-              : props.codeDiff?.length
-                ? '相对上一版的变更（未改动行已折叠）'
-                : 'index.html · 单文件'}
+              : props.viewingVersionN != null
+                ? `浏览版本 ${props.viewingVersionN}（未回滚前预览不变）`
+                : showDiff
+                  ? '相对上一版的变更（未改动行已折叠）'
+                  : 'index.html · 单文件'}
           </span>
+          <button
+            type="button"
+            className="btn ghost sm"
+            disabled={!props.html.trim()}
+            onClick={props.onExportHtml}
+            title="导出当前版本到本机"
+          >
+            导出
+          </button>
         </header>
 
         {/* 步骤：迭代冻稿时加轻量「修改中」层，避免代码区完全静止像卡死 */}
@@ -543,36 +596,81 @@ export function Workspace(props: {
                 srcDoc={props.html || emptyPreview}
               />
             </div>
-          ) : props.codeDiff && props.codeDiff.length > 0 ? (
-            <pre
-              className="code-view code-diff stage-body"
-              tabIndex={0}
-              ref={codeRef}
-              aria-label="相对上一版的代码变更"
-            >
-              <code>
-                {props.codeDiff.map((line, i) => (
-                  <span
-                    key={`${line.type}-${i}`}
-                    className={`diff-line diff-${line.type}`}
-                  >
-                    {line.type === 'add'
-                      ? '+ '
-                      : line.type === 'del'
-                        ? '- '
-                        : line.type === 'skip'
-                          ? ''
-                          : '  '}
-                    {line.text}
-                    {'\n'}
-                  </span>
-                ))}
-              </code>
-            </pre>
           ) : (
-            <pre className="code-view stage-body" tabIndex={0} ref={codeRef}>
-              <code>{props.html || '<!-- 尚未生成 index.html -->'}</code>
-            </pre>
+            <div className="code-with-versions stage-body">
+              {props.versions.length > 0 ? (
+                <aside className="version-rail" aria-label="历史版本">
+                  <p className="version-rail-title">历史版本</p>
+                  <ul className="version-rail-list">
+                    {[...props.versions].reverse().map((v) => {
+                      const isCurrent = v.n === props.currentVersionN
+                      const isViewing =
+                        (props.viewingVersionN ?? props.currentVersionN) ===
+                        v.n
+                      return (
+                        <li key={v.n}>
+                          <button
+                            type="button"
+                            className={`version-rail-item${isViewing ? ' active' : ''}`}
+                            onClick={() => props.onViewVersion(v.n)}
+                          >
+                            <span className="version-rail-n">
+                              v{v.n}
+                              {isCurrent ? ' · 当前' : ''}
+                            </span>
+                            <span className="version-rail-summary">
+                              {v.promptSummary}
+                            </span>
+                          </button>
+                          {!isCurrent ? (
+                            <button
+                              type="button"
+                              className="btn ghost sm version-rollback"
+                              onClick={() => props.onRollbackVersion(v.n)}
+                            >
+                              回滚到此版本
+                            </button>
+                          ) : null}
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </aside>
+              ) : null}
+              {showDiff && props.codeDiff ? (
+                <pre
+                  className="code-view code-diff"
+                  tabIndex={0}
+                  ref={codeRef}
+                  aria-label="相对上一版的代码变更"
+                >
+                  <code>
+                    {props.codeDiff.map((line, i) => (
+                      <span
+                        key={`${line.type}-${i}`}
+                        className={`diff-line diff-${line.type}`}
+                      >
+                        {line.type === 'add'
+                          ? '+ '
+                          : line.type === 'del'
+                            ? '- '
+                            : line.type === 'skip'
+                              ? ''
+                              : '  '}
+                        {line.text}
+                        {'\n'}
+                      </span>
+                    ))}
+                  </code>
+                </pre>
+              ) : (
+                <pre className="code-view" tabIndex={0} ref={codeRef}>
+                  <code>
+                    {codeHtml || '<!-- 尚未生成 index.html -->'}
+                  </code>
+                </pre>
+              )}
+            </div>
           )}
           {props.iterationStreaming ? (
             <div className="mutating-overlay" aria-live="polite">
@@ -609,7 +707,7 @@ function AnimatedStage(props: { text: string; className?: string }) {
   )
 }
 
-/** 将对话轮次压成 API 需要的 messages（不含装饰 version） */
+/** 将对话轮次压成 API 需要的 messages（不含 version / system / error） */
 export function chatToMessages(chat: ChatItem[]): ChatTurn[] {
   return chat
     .filter((c): c is Extract<ChatItem, { kind: 'user' | 'assistant' }> =>

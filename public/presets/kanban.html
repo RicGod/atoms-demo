@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>待办看板生成器</title>
+  <style>
+    :root {
+      --sea: #16324a;
+      --paper: #f4f8fb;
+      --ink: #142433;
+      --muted: #52687a;
+      --line: #c5d4e0;
+      --high: #9b2335;
+      --mid: #8a5a12;
+      --low: #1d6b48;
+      --doing: #0b6e8a;
+      color-scheme: light;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--sea);
+      color: var(--ink);
+      font-family: Bahnschrift, "Microsoft YaHei", "PingFang SC", sans-serif;
+    }
+    h1 {
+      margin: 0;
+      padding: 1.1rem 1rem .4rem;
+      color: #f4f8fb;
+      font-size: 1.7rem;
+      font-weight: 600;
+    }
+    .board {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: .75rem;
+      padding: .4rem 1rem 1.2rem;
+      align-items: start;
+    }
+    .col {
+      background: var(--paper);
+      padding: .75rem;
+      display: flex;
+      flex-direction: column;
+      gap: .55rem;
+      min-width: 0;
+    }
+    .col[data-col="todo"] { border-top: 4px solid var(--high); }
+    .col[data-col="doing"] { border-top: 4px solid var(--doing); }
+    .col[data-col="done"] { border-top: 4px solid var(--low); }
+    .col header { display: flex; justify-content: space-between; align-items: baseline; }
+    h2 { margin: 0; font-size: 1rem; font-weight: 600; }
+    .count { color: var(--muted); font-size: .9rem; }
+    .list { min-height: 4.5rem; display: flex; flex-direction: column; gap: .45rem; }
+    .card {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--line);
+      padding: .6rem .7rem .65rem;
+      cursor: grab;
+      user-select: none;
+      touch-action: none;
+    }
+    .card:has(.pri-high) { border-left-color: var(--high); }
+    .card:has(.pri-mid) { border-left-color: var(--mid); }
+    .card:has(.pri-low) { border-left-color: var(--low); }
+    .card.is-editing { cursor: default; touch-action: auto; user-select: auto; }
+    .pri { font-size: .8rem; }
+    .pri-high { color: var(--high); }
+    .pri-mid { color: var(--mid); }
+    .pri-low { color: var(--low); }
+    h3 { margin: .15rem 0 .25rem; font-size: 1.02rem; font-weight: 600; line-height: 1.35; }
+    .due, .late { margin: 0; font-size: .82rem; }
+    .due { color: var(--muted); }
+    .late { color: var(--high); margin-top: .15rem; }
+    .gap { height: .7rem; border: 2px dashed var(--doing); background: rgba(11, 110, 138, .12); }
+    .mini { display: flex; flex-direction: column; gap: .2rem; margin-top: .45rem; font-size: .82rem; color: var(--muted); }
+    input, select, button { font: inherit; }
+    input, select {
+      width: 100%;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--ink);
+      padding: .4rem .45rem;
+      border-radius: 0;
+    }
+    .title-input { font-size: 1rem; color: var(--ink); }
+    .actions { display: flex; justify-content: space-between; gap: .5rem; margin-top: .55rem; }
+    button {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--ink);
+      padding: .45rem .7rem;
+      border-radius: 2px;
+      cursor: pointer;
+    }
+    button.primary { background: var(--sea); color: #f4f8fb; border-color: var(--sea); }
+    button.danger { color: var(--high); border-color: transparent; background: transparent; padding-left: 0; }
+    .add { width: 100%; border-style: dashed; background: transparent; }
+    :focus-visible { outline: 2px solid var(--doing); outline-offset: 2px; }
+  </style>
+</head>
+<body>
+  <h1>看板</h1>
+  <div class="board" id="board">
+    <section class="col" data-col="todo">
+      <header><h2>待办</h2><span class="count" data-count="todo">0</span></header>
+      <div class="list" data-list="todo"></div>
+      <button class="add" type="button" data-add="todo">添加卡片</button>
+    </section>
+    <section class="col" data-col="doing">
+      <header><h2>进行中</h2><span class="count" data-count="doing">0</span></header>
+      <div class="list" data-list="doing"></div>
+      <button class="add" type="button" data-add="doing">添加卡片</button>
+    </section>
+    <section class="col" data-col="done">
+      <header><h2>已完成</h2><span class="count" data-count="done">0</span></header>
+      <div class="list" data-list="done"></div>
+      <button class="add" type="button" data-add="done">添加卡片</button>
+    </section>
+  </div>
+  <script>
+    (function () {
+      var COLS = [
+        { id: 'todo', name: '待办' },
+        { id: 'doing', name: '进行中' },
+        { id: 'done', name: '已完成' }
+      ];
+      var PRI = { high: '高', mid: '中', low: '低' };
+      var state = { columns: { todo: [], doing: [], done: [] }, editingId: null };
+      var seq = 1;
+      var press = null;
+      var board = document.getElementById('board');
+
+      function uid() { return 'c' + seq++; }
+
+      // 步骤：种子日期按打开当天计算，逾期卡不会因为日历前进而失效
+      function iso(offsetDays) {
+        var d = new Date();
+        d.setHours(12, 0, 0, 0);
+        d.setDate(d.getDate() + offsetDays);
+        var m = String(d.getMonth() + 1).padStart(2, '0');
+        var day = String(d.getDate()).padStart(2, '0');
+        return d.getFullYear() + '-' + m + '-' + day;
+      }
+
+      state.columns.todo.push(
+        { id: uid(), title: '对齐需求范围', priority: 'high', due: iso(-1) },
+        { id: uid(), title: '补一版空状态', priority: 'mid', due: '' }
+      );
+      state.columns.doing.push(
+        { id: uid(), title: '接上拖拽排序', priority: 'high', due: iso(3) },
+        { id: uid(), title: '核对逾期规则', priority: 'low', due: iso(7) }
+      );
+      state.columns.done.push(
+        { id: uid(), title: '定下三列', priority: 'mid', due: iso(-1) }
+      );
+
+      function locate(id) {
+        for (var i = 0; i < COLS.length; i++) {
+          var list = state.columns[COLS[i].id];
+          var index = list.findIndex(function (card) { return card.id === id; });
+          if (index >= 0) return { col: COLS[i].id, index: index, card: list[index] };
+        }
+        return null;
+      }
+
+      // 步骤：截止日期早于今天且不在「已完成」才算逾期；没有日期不算
+      function isLate(card, colId) {
+        return Boolean(card.due) && card.due < iso(0) && colId !== 'done';
+      }
+
+      function renderCard(card, colId) {
+        var art = document.createElement('article');
+        art.className = 'card' + (state.editingId === card.id ? ' is-editing' : '');
+        art.dataset.id = card.id;
+        if (state.editingId === card.id) {
+          var title = document.createElement('input');
+          title.className = 'title-input';
+          title.value = card.title;
+          title.placeholder = '要做什么';
+          title.setAttribute('aria-label', '标题');
+
+          var priLabel = document.createElement('label');
+          priLabel.className = 'mini';
+          priLabel.append(document.createTextNode('优先级'));
+          var pri = document.createElement('select');
+          pri.className = 'pri-input';
+          ['high', 'mid', 'low'].forEach(function (key) {
+            var opt = document.createElement('option');
+            opt.value = key;
+            opt.textContent = PRI[key];
+            if (card.priority === key) opt.selected = true;
+            pri.append(opt);
+          });
+          priLabel.append(pri);
+
+          var dueLabel = document.createElement('label');
+          dueLabel.className = 'mini';
+          dueLabel.append(document.createTextNode('截止日期'));
+          var due = document.createElement('input');
+          due.className = 'due-input';
+          due.type = 'date';
+          due.value = card.due;
+          dueLabel.append(due);
+
+          var actions = document.createElement('div');
+          actions.className = 'actions';
+          var del = document.createElement('button');
+          del.type = 'button';
+          del.className = 'danger';
+          del.dataset.del = card.id;
+          del.textContent = '删除';
+          var done = document.createElement('button');
+          done.type = 'button';
+          done.className = 'primary';
+          done.dataset.done = card.id;
+          done.textContent = '完成';
+          actions.append(del, done);
+          art.append(title, priLabel, dueLabel, actions);
+          return art;
+        }
+
+        var badge = document.createElement('span');
+        badge.className = 'pri pri-' + card.priority;
+        badge.textContent = PRI[card.priority] || '中';
+        var heading = document.createElement('h3');
+        heading.textContent = card.title;
+        art.append(badge, heading);
+        if (card.due) {
+          var dueText = document.createElement('p');
+          dueText.className = 'due';
+          dueText.textContent = card.due;
+          art.append(dueText);
+        }
+        if (isLate(card, colId)) {
+          var late = document.createElement('p');
+          late.className = 'late';
+          late.textContent = '逾期';
+          art.append(late);
+        }
+        return art;
+      }
+
+      function render() {
+        COLS.forEach(function (col) {
+          var list = board.querySelector('[data-list="' + col.id + '"]');
+          var count = board.querySelector('[data-count="' + col.id + '"]');
+          list.replaceChildren();
+          state.columns[col.id].forEach(function (card) {
+            list.append(renderCard(card, col.id));
+          });
+          count.textContent = String(state.columns[col.id].length);
+        });
+        if (!state.editingId) return;
+        window.setTimeout(function () {
+          var input = board.querySelector('.card.is-editing .title-input');
+          if (input) input.focus();
+        }, 0);
+      }
+
+      // 步骤：标题留空就不保留这张卡，列上不出现空白卡
+      function commit(id) {
+        var found = locate(id);
+        if (!found) {
+          if (state.editingId === id) state.editingId = null;
+          return;
+        }
+        var el = board.querySelector('.card[data-id="' + id + '"]');
+        if (!el) return;
+        var title = el.querySelector('.title-input').value.trim();
+        if (!title) {
+          state.columns[found.col].splice(found.index, 1);
+        } else {
+          found.card.title = title;
+          found.card.priority = el.querySelector('.pri-input').value;
+          found.card.due = el.querySelector('.due-input').value;
+        }
+        if (state.editingId === id) state.editingId = null;
+      }
+
+      function openEdit(id) {
+        state.editingId = id;
+        render();
+      }
+
+      function addCard(colId) {
+        var card = { id: uid(), title: '', priority: 'mid', due: '' };
+        state.columns[colId].push(card);
+        state.editingId = card.id;
+        render();
+      }
+
+      function removeCard(id) {
+        var found = locate(id);
+        if (!found) return;
+        state.columns[found.col].splice(found.index, 1);
+        if (state.editingId === id) state.editingId = null;
+        render();
+      }
+
+      // 步骤：落点下标按「不含被拖卡片」计算，松手后插到该位置，不按优先级重排
+      function moveCard(id, toCol, toIndex) {
+        var card = null;
+        COLS.forEach(function (col) {
+          var list = state.columns[col.id];
+          var index = list.findIndex(function (item) { return item.id === id; });
+          if (index >= 0) card = list.splice(index, 1)[0];
+        });
+        if (!card || !state.columns[toCol]) return;
+        var dest = state.columns[toCol];
+        var index = Math.max(0, Math.min(toIndex, dest.length));
+        dest.splice(index, 0, card);
+      }
+
+      function clearGap() {
+        board.querySelectorAll('.gap').forEach(function (node) { node.remove(); });
+      }
+
+      function showGap(colId, index) {
+        clearGap();
+        var list = board.querySelector('[data-list="' + colId + '"]');
+        var gap = document.createElement('div');
+        gap.className = 'gap';
+        var cards = list.querySelectorAll('.card');
+        if (cards[index]) list.insertBefore(gap, cards[index]);
+        else list.append(gap);
+      }
+
+      function dropIndex(colEl, clientY) {
+        var cards = colEl.querySelectorAll('.card');
+        for (var i = 0; i < cards.length; i++) {
+          var rect = cards[i].getBoundingClientRect();
+          if (clientY < rect.top + rect.height / 2) return i;
+        }
+        return cards.length;
+      }
+
+      board.addEventListener('pointerdown', function (e) {
+        if (e.button !== undefined && e.button !== 0) return;
+        var addBtn = e.target.closest('[data-add]');
+        var cardEl = e.target.closest('.card');
+        if (state.editingId) {
+          var editing = board.querySelector('.card.is-editing');
+          if (editing && editing.contains(e.target)) return;
+          var nextId = cardEl && cardEl.dataset.id;
+          commit(state.editingId);
+          if (addBtn) {
+            addCard(addBtn.dataset.add);
+            return;
+          }
+          if (nextId && locate(nextId)) {
+            openEdit(nextId);
+            return;
+          }
+          render();
+          return;
+        }
+        if (addBtn) {
+          addCard(addBtn.dataset.add);
+          return;
+        }
+        if (!cardEl || e.target.closest('input, select, button, textarea')) return;
+        press = {
+          id: cardEl.dataset.id,
+          x: e.clientX,
+          y: e.clientY,
+          pointerId: e.pointerId,
+          dragging: false
+        };
+        try { board.setPointerCapture(e.pointerId); } catch (err) { /* 指针已结束时忽略 */ }
+      });
+
+      board.addEventListener('pointermove', function (e) {
+        if (!press || e.pointerId !== press.pointerId) return;
+        var dx = e.clientX - press.x;
+        var dy = e.clientY - press.y;
+        if (!press.dragging) {
+          if (dx * dx + dy * dy < 25) return;
+          var found = locate(press.id);
+          if (!found) return;
+          press.dragging = true;
+          press.overCol = found.col;
+          press.overIndex = found.index;
+          var el = board.querySelector('.card[data-id="' + press.id + '"]');
+          if (el) el.remove();
+          showGap(found.col, found.index);
+        }
+        var hit = document.elementFromPoint(e.clientX, e.clientY);
+        var colEl = hit && hit.closest('[data-col]');
+        if (!colEl) return;
+        var index = dropIndex(colEl, e.clientY);
+        if (press.overCol === colEl.dataset.col && press.overIndex === index) return;
+        press.overCol = colEl.dataset.col;
+        press.overIndex = index;
+        showGap(press.overCol, index);
+      });
+
+      function finish(e) {
+        if (!press || e.pointerId !== press.pointerId) return;
+        var was = press;
+        press = null;
+        try { board.releasePointerCapture(e.pointerId); } catch (err) { /* 未捕获时忽略 */ }
+        if (!was.dragging) {
+          if (e.type !== 'pointercancel') openEdit(was.id);
+          return;
+        }
+        moveCard(was.id, was.overCol, was.overIndex);
+        render();
+      }
+
+      board.addEventListener('pointerup', finish);
+      board.addEventListener('pointercancel', finish);
+
+      board.addEventListener('click', function (e) {
+        var del = e.target.closest('[data-del]');
+        if (del) {
+          removeCard(del.dataset.del);
+          return;
+        }
+        var done = e.target.closest('[data-done]');
+        if (!done) return;
+        commit(done.dataset.done);
+        render();
+      });
+
+      board.addEventListener('keydown', function (e) {
+        if (!state.editingId) return;
+        var inTitle = e.target.classList && e.target.classList.contains('title-input');
+        if (e.key === 'Escape' || (e.key === 'Enter' && inTitle)) {
+          e.preventDefault();
+          commit(state.editingId);
+          render();
+        }
+      });
+
+      render();
+    })();
+  </script>
+</body>
+</html>
