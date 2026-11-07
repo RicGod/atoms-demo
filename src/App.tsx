@@ -113,6 +113,85 @@ export default function App() {
   const [codeDiff, setCodeDiff] = useState<DiffLine[] | null>(null)
   /** 赛马发送时的对话快照，供择优落库 */
   const raceChatAtSendRef = useRef<ChatItem[] | null>(null)
+  /** 与 activeTaskId 同步，供流式回调判断「当前 UI 是否绑在该项目」 */
+  const activeTaskIdRef = useRef<string | null>(null)
+  /** 是否正停留在工作区页（列表/首页时为 false，后台会话不得改 UI） */
+  const workspaceVisibleRef = useRef(false)
+  /**
+   * 按 Task 挂起的生成会话：切走 B 时 A 继续跑；再进 A 可接回思考面板
+   * guest 用键 "__guest__"
+   */
+  type TaskGenSession = {
+    taskKey: string
+    abort: AbortController
+    streamThinking: string
+    streamStage: string
+    streaming: boolean
+    iterationStreaming: boolean
+    isIteration: boolean
+    chatAtSend: ChatItem[]
+    partialHtml: string
+  }
+  const taskGenRef = useRef<Map<string, TaskGenSession>>(new Map())
+  const guestGenKey = '__guest__'
+
+  const taskGenKey = (taskId: string | null, guest: boolean) =>
+    taskId ? taskId : guest ? guestGenKey : null
+
+  /** 当前屏幕是否正显示该 Task 的工作区 */
+  const isUiBoundTo = (taskKey: string | null) => {
+    if (!taskKey || !workspaceVisibleRef.current) return false
+    if (taskKey === guestGenKey) {
+      return activeTaskIdRef.current == null
+    }
+    return activeTaskIdRef.current === taskKey
+  }
+
+  /** 仅拆掉 UI 上的思考面板，不中止后台生成 */
+  const detachStreamUi = () => {
+    setStreaming(false)
+    setIterationStreaming(false)
+    setStreamThinking('')
+    setStreamStage('')
+    setRacing(false)
+    setCodeDiff(null)
+  }
+
+  /** 进入某项目时：若该 Task 仍在生成，把思考过程接回对话框 */
+  const attachTaskGenUi = (taskKey: string | null) => {
+    if (!taskKey) {
+      detachStreamUi()
+      return
+    }
+    const s = taskGenRef.current.get(taskKey)
+    if (s?.streaming) {
+      setStreaming(true)
+      setIterationStreaming(s.iterationStreaming)
+      setStreamThinking(s.streamThinking)
+      setStreamStage(s.streamStage || '正在生成…')
+      setChat(s.chatAtSend)
+      if (!s.isIteration && s.partialHtml) setHtml(s.partialHtml)
+      setPane('code')
+      setStatus({ kind: 'info', text: '正在生成，源码会实时出现在右侧…' })
+    } else {
+      detachStreamUi()
+    }
+  }
+
+  /** 结束/取消某一 Task 的生成会话 */
+  const clearTaskGen = (taskKey: string | null, abort = false) => {
+    if (!taskKey) return
+    const s = taskGenRef.current.get(taskKey)
+    if (!s) return
+    if (abort) {
+      try {
+        s.abort.abort()
+      } catch {
+        /* ignore */
+      }
+    }
+    taskGenRef.current.delete(taskKey)
+  }
 
   /** 无思考链时轮换阶段文案，避免只显示「生成中」（省略号由 UI 动态点出） */
   const beginStreamUi = () => {
@@ -260,8 +339,13 @@ export default function App() {
 
   /** 步骤：退出登录时清空工作区会话，避免登录对话泄漏到访客首页/工作区 */
   const clearWorkspaceSession = () => {
+    // 步骤：退出时中止所有挂起的按 Task 生成
+    for (const key of [...taskGenRef.current.keys()]) {
+      clearTaskGen(key, true)
+    }
     setGuestSession(false)
     setActiveTaskId(null)
+    activeTaskIdRef.current = null
     setChat([])
     setHtml('')
     setDraft('')
@@ -391,8 +475,12 @@ export default function App() {
     existingVersions?: TaskVersionSnapshot[]
     existingCurrentVersionN?: number
   }) => {
+    // 步骤：只拆当前思考 UI，不 abort 其它项目正在跑的生成
+    detachStreamUi()
     setGuestSession(opts.guest)
     setActiveTaskId(opts.taskId)
+    activeTaskIdRef.current = opts.taskId
+    workspaceVisibleRef.current = true
     setRaceCandidates(null)
     setCodeDiff(null)
     setViewingVersionN(null)
@@ -408,7 +496,15 @@ export default function App() {
     setVersions(migrated.versions)
     setCurrentVersionN(migrated.currentVersionN)
 
-    if (opts.existingChat && opts.existingChat.length > 0) {
+    const resumeKey = taskGenKey(opts.taskId, opts.guest)
+    const resuming = Boolean(
+      resumeKey && taskGenRef.current.get(resumeKey)?.streaming,
+    )
+
+    if (resuming) {
+      // 步骤：该项目仍在生成 — 对话/思考由 attach 接回，勿用库里的旧 chat 盖掉
+      setDraft('')
+    } else if (opts.existingChat && opts.existingChat.length > 0) {
       setHtml(migrated.html || opts.existingHtml || '')
       setChat(opts.existingChat)
       setDraft('')
@@ -438,6 +534,8 @@ export default function App() {
       if (opts.titleHint) setDraft(opts.titleHint)
     }
     setView('workspace')
+    // 步骤：若 A 仍在后台思考，重新进入 A 时接回思考面板
+    attachTaskGenUi(resumeKey)
   }
 
   /** 单路生成 / 对话迭代 */
@@ -466,26 +564,90 @@ export default function App() {
       return
     }
 
+    // 步骤：生成会话挂到 Task；切走只停 UI，后台继续；再进同一项目可接回思考面板
+    const boundTaskId = activeTaskId
+    const boundKey = taskGenKey(boundTaskId, Boolean(guestSession || !signedIn))
+    const versionsAtSend = versions
+    // 同项目再次发送：取消上一轮；其它项目的会话不动
+    if (boundKey) clearTaskGen(boundKey, true)
+    const abort = new AbortController()
+    const signal = abort.signal
+
+    const userMsg: ChatItem = { kind: 'user', id: nid('u'), text: p }
+    const chatAtSend: ChatItem[] = [...chat, userMsg]
+    const currentHtml = html || undefined
+    const isIteration = Boolean(currentHtml?.trim())
+    const history = chatToMessages(chatAtSend)
+
+    if (boundKey) {
+      taskGenRef.current.set(boundKey, {
+        taskKey: boundKey,
+        abort,
+        streamThinking: '',
+        streamStage: isIteration
+          ? '正在按你的要求修改现有页面'
+          : '正在理解你的需求',
+        streaming: true,
+        iterationStreaming: isIteration,
+        isIteration,
+        chatAtSend,
+        partialHtml: '',
+      })
+    }
+
+    const touchSession = (patch: (s: TaskGenSession) => void) => {
+      if (!boundKey) return null
+      const s = taskGenRef.current.get(boundKey)
+      if (!s) return null
+      patch(s)
+      return s
+    }
+
+    const onThinkingBound = (t: string, stage: string) => {
+      const s = touchSession((sess) => {
+        sess.streamThinking += t
+        sess.streamStage = stage
+      })
+      if (s && isUiBoundTo(boundKey)) {
+        setStreamThinking(s.streamThinking)
+        setStreamStage(stage)
+      }
+    }
+
+    const onHtmlBound = (h: string) => {
+      const s = touchSession((sess) => {
+        sess.partialHtml = h
+      })
+      if (!s || !isUiBoundTo(boundKey)) return
+      bumpStageFromHtml(h, isIteration)
+      if (!isIteration) setHtml(h)
+    }
+
     setStreaming(true)
     beginStreamUi()
     setRaceCandidates(null)
     setStatus({ kind: 'info', text: '正在生成，源码会实时出现在右侧…' })
-    const userMsg: ChatItem = { kind: 'user', id: nid('u'), text: p }
-    // 步骤：发送瞬间冻结对话快照，避免长请求后 setState prev 丢首轮 user
-    const chatAtSend: ChatItem[] = [...chat, userMsg]
     setChat(chatAtSend)
     setDraft('')
-
-    const history = chatToMessages(chatAtSend)
-    const currentHtml = html || undefined
-    // 步骤：已有页面再改 = 迭代；代码区保留旧稿，避免整页从头流式刷一遍
-    const isIteration = Boolean(currentHtml?.trim())
     setIterationStreaming(isIteration)
     setCodeDiff(null)
     if (!isIteration) {
       setHtml('')
     } else {
       setStreamStage('正在按你的要求修改现有页面')
+    }
+
+    const finishUiIfBound = () => {
+      touchSession((s) => {
+        s.streaming = false
+        s.iterationStreaming = false
+      })
+      if (isUiBoundTo(boundKey)) {
+        setStreaming(false)
+        setIterationStreaming(false)
+        setStreamStage('')
+      }
+      if (boundKey) clearTaskGen(boundKey, false)
     }
 
     try {
@@ -497,16 +659,13 @@ export default function App() {
           model: activeProfile.model,
           messages: history,
           currentHtml,
-          onThinking: (t) => {
-            setStreamThinking((prev) => prev + t)
-            setStreamStage(
+          signal,
+          onThinking: (t) =>
+            onThinkingBound(
+              t,
               isIteration ? '正在针对性修改' : '正在思考怎么实现',
-            )
-          },
-          onHtml: (h) => {
-            bumpStageFromHtml(h, isIteration)
-            if (!isIteration) setHtml(h)
-          },
+            ),
+          onHtml: onHtmlBound,
         })
         if (result.ok) {
           await applySuccess(
@@ -516,16 +675,21 @@ export default function App() {
             'single',
             chatAtSend,
             isIteration ? currentHtml : undefined,
+            { boundTaskId, boundKey, versionsAtSend },
           )
+          finishUiIfBound()
           return
         }
-        setChat(
-          chatWithError(
-            chatAtSend,
-            result.message || '平台默认模型生成失败，请稍后重试',
-          ),
-        )
-        setStatus({ kind: 'idle', text: '' })
+        if (isUiBoundTo(boundKey)) {
+          setChat(
+            chatWithError(
+              chatAtSend,
+              result.message || '平台默认模型生成失败，请稍后重试',
+            ),
+          )
+          setStatus({ kind: 'idle', text: '' })
+        }
+        finishUiIfBound()
         return
       }
 
@@ -535,17 +699,13 @@ export default function App() {
           config: byok,
           currentHtml,
           messages: history,
-          onThinking: (t) => {
-            setStreamThinking((prev) => prev + t)
-            setStreamStage(
+          signal,
+          onThinking: (t) =>
+            onThinkingBound(
+              t,
               isIteration ? '正在针对性修改' : '模型正在思考',
-            )
-          },
-          onHtml: (h) => {
-            bumpStageFromHtml(h, isIteration)
-            // 步骤：仅初版把流式正文推到代码区；迭代等完成后再用 diff 展示
-            if (!isIteration) setHtml(h)
-          },
+            ),
+          onHtml: onHtmlBound,
         })
         if (result.ok) {
           await applySuccess(
@@ -555,15 +715,19 @@ export default function App() {
             'single',
             chatAtSend,
             isIteration ? currentHtml : undefined,
+            { boundTaskId, boundKey, versionsAtSend },
           )
+          finishUiIfBound()
           return
         }
-        // 步骤：真实错误进对话框，不再挂在输入框下方
-        const detail = result.message
-          ? `模型调用失败：${result.message.slice(0, 180)}`
-          : '模型暂时不可用，请检查 Base URL、密钥、模型名，以及浏览器是否被 CORS 拦截'
-        setChat(chatWithError(chatAtSend, detail))
-        setStatus({ kind: 'idle', text: '' })
+        if (isUiBoundTo(boundKey)) {
+          const detail = result.message
+            ? `模型调用失败：${result.message.slice(0, 180)}`
+            : '模型暂时不可用，请检查 Base URL、密钥、模型名，以及浏览器是否被 CORS 拦截'
+          setChat(chatWithError(chatAtSend, detail))
+          setStatus({ kind: 'idle', text: '' })
+        }
+        finishUiIfBound()
         return
       }
 
@@ -574,16 +738,13 @@ export default function App() {
         model,
         messages: history,
         currentHtml,
-        onThinking: (t) => {
-          setStreamThinking((prev) => prev + t)
-          setStreamStage(
+        signal,
+        onThinking: (t) =>
+          onThinkingBound(
+            t,
             isIteration ? '正在针对性修改' : '正在思考怎么实现',
-          )
-        },
-        onHtml: (h) => {
-          bumpStageFromHtml(h, isIteration)
-          if (!isIteration) setHtml(h)
-        },
+          ),
+        onHtml: onHtmlBound,
       })
 
       if (result.ok) {
@@ -594,32 +755,40 @@ export default function App() {
           'single',
           chatAtSend,
           isIteration ? currentHtml : undefined,
+          { boundTaskId, boundKey, versionsAtSend },
         )
+        finishUiIfBound()
         return
       }
 
-      // 步骤：失败只报错进对话；禁止再静默随机切预设
-      const failText =
-        result.message ||
-        (signedIn
-          ? '这一轮没生成成功，可以换个说法再试，或检查模型配置'
-          : '云端生成没有成功。可稍后再试，或回首页点选「演示」体验示例（演示与本次输入无关）')
-      setChat(chatWithError(chatAtSend, failText))
-      setStatus({ kind: 'idle', text: '' })
+      if (isUiBoundTo(boundKey)) {
+        const failText =
+          result.message ||
+          (signedIn
+            ? '这一轮没生成成功，可以换个说法再试，或检查模型配置'
+            : '云端生成没有成功。可稍后再试，或回首页点选「演示」体验示例（演示与本次输入无关）')
+        setChat(chatWithError(chatAtSend, failText))
+        setStatus({ kind: 'idle', text: '' })
+      }
+      finishUiIfBound()
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      setChat(chatWithError(chatAtSend, `生成异常：${msg.slice(0, 160)}`))
-      setStatus({ kind: 'idle', text: '' })
-    } finally {
-      setStreaming(false)
-      setIterationStreaming(false)
-      setStreamStage('')
+      if (e instanceof Error && e.name === 'AbortError') {
+        finishUiIfBound()
+        return
+      }
+      if (isUiBoundTo(boundKey)) {
+        const msg = e instanceof Error ? e.message : String(e)
+        setChat(chatWithError(chatAtSend, `生成异常：${msg.slice(0, 160)}`))
+        setStatus({ kind: 'idle', text: '' })
+      }
+      finishUiIfBound()
     }
   }
 
   /**
    * 生成成功：先更新预览，再向模型要一句改动短摘要，写入版本卡后落库
    * @param chatAtSend 发送瞬间的完整对话（必须已含本轮 user），禁止再从可能被清空的 state 推导
+   * @param bind 本轮绑定的 Task；若当前 UI 不在该项目，则不改对话框，仅后台写入原 Task
    */
   const applySuccess = async (
     userPrompt: string,
@@ -629,24 +798,22 @@ export default function App() {
     chatAtSend: ChatItem[],
     /** 迭代前的 HTML；有则代码区展示变更对照，而非整页重播 */
     previousHtml?: string,
+    bind?: {
+      boundTaskId: string | null
+      boundKey: string | null
+      versionsAtSend: TaskVersionSnapshot[]
+    },
   ) => {
-    setHtml(nextHtml)
-    setPrompt(userPrompt)
-    setStreamThinking('')
-    setStreamStage('')
-    setPane('preview')
-
     const hadBase = Boolean(previousHtml?.trim())
-    if (hadBase && previousHtml !== nextHtml) {
-      setCodeDiff(collapseUnchanged(diffLines(previousHtml!, nextHtml)))
-    } else {
-      setCodeDiff(null)
-    }
+    const uiBound = () =>
+      bind?.boundKey ? isUiBoundTo(bind.boundKey) : true
 
     // 步骤：mock/演示不额外打模型；其余请求一句短摘要，失败回退 Prompt 截断
     let changeSummary = sanitizeChangeSummary('', userPrompt)
     if (nextMode !== 'mock') {
-      setStatus({ kind: 'info', text: '正在概括本轮改动…' })
+      if (uiBound()) {
+        setStatus({ kind: 'info', text: '正在概括本轮改动…' })
+      }
       try {
         changeSummary = sanitizeChangeSummary(
           await summarizeVersionChange({
@@ -660,9 +827,10 @@ export default function App() {
       }
     }
 
-    // 步骤：线性追加 Version 快照（与对话卡序号一致）
+    // 步骤：线性追加 Version；须用发送时快照，避免串到新项目的 versions state
+    const baseVersions = bind?.versionsAtSend ?? versions
     const appended = appendVersionSnapshot({
-      versions,
+      versions: baseVersions,
       prompt: userPrompt,
       html: nextHtml,
       changeSummary,
@@ -687,12 +855,11 @@ export default function App() {
         label: versionCardLabel(nextVer, changeSummary),
       },
     ]
-    setVersions(appended.versions)
-    setCurrentVersionN(nextVer)
-    setViewingVersionN(null)
-    setChat(nextChat)
-    // 步骤：副作用放在 setState 外，避免 Strict Mode 双调 updater 丢消息 / 重复保存
-    if (signedIn && activeTaskId) {
+
+    // 步骤：成功结果只写回「发起生成」的 Task；UI 是否更新看此刻是否仍停留在该项目
+    const saveToId = bind?.boundTaskId ?? activeTaskId
+    const showUi = uiBound()
+    if (signedIn && saveToId) {
       void autoSave(
         userPrompt,
         nextHtml,
@@ -701,8 +868,28 @@ export default function App() {
         nextChat,
         appended.versions,
         nextVer,
+        saveToId,
+        { updateUi: showUi },
       )
     }
+
+    // 步骤：人还在别的项目时不动对话框；若中途又回到本项目，下面会正常刷新
+    if (!showUi) return
+
+    setHtml(nextHtml)
+    setPrompt(userPrompt)
+    setStreamThinking('')
+    setStreamStage('')
+    setPane('preview')
+    if (hadBase && previousHtml !== nextHtml) {
+      setCodeDiff(collapseUnchanged(diffLines(previousHtml!, nextHtml)))
+    } else {
+      setCodeDiff(null)
+    }
+    setVersions(appended.versions)
+    setCurrentVersionN(nextVer)
+    setViewingVersionN(null)
+    setChat(nextChat)
 
     if (hadBase && previousHtml !== nextHtml) {
       setStatus({
@@ -718,7 +905,7 @@ export default function App() {
     }
   }
 
-  /** 步骤：生成成功后自动写回当前项目（HTML + versions + 对话） */
+  /** 步骤：生成成功后自动写回指定项目（HTML + versions + 对话） */
   const autoSave = async (
     userPrompt: string,
     nextHtml: string,
@@ -727,11 +914,15 @@ export default function App() {
     nextChat: ChatItem[],
     nextVersions: TaskVersionSnapshot[],
     nextCurrentN: number,
+    /** 显式指定 Task，防止切项目后写到错误 id */
+    taskId: string,
+    opts?: { updateUi?: boolean },
   ) => {
-    if (!activeTaskId) return
+    if (!taskId) return
+    const updateUi = opts?.updateUi !== false
     try {
       await saveTask({
-        id: activeTaskId,
+        id: taskId,
         email,
         prompt: userPrompt,
         html: nextHtml,
@@ -742,8 +933,11 @@ export default function App() {
         currentVersionN: nextCurrentN,
       })
       await refreshTasks(email)
-      setStatus({ kind: 'info', text: '已自动保存代码、版本与对话' })
+      if (updateUi) {
+        setStatus({ kind: 'info', text: '已自动保存代码、版本与对话' })
+      }
     } catch (e) {
+      if (!updateUi) return
       // 步骤：自动保存失败也进对话区，方便用户看到
       const msg = e instanceof Error ? e.message : String(e)
       setChat((prev) => chatWithError(prev, `自动保存失败：${msg}`))
@@ -787,6 +981,7 @@ export default function App() {
         nextChat,
         versions,
         n,
+        activeTaskId,
       )
     }
     setStatus({ kind: 'info', text: `已回滚到版本 ${n}` })
@@ -820,6 +1015,8 @@ export default function App() {
     // 步骤：进入访客工作区（不落库），再跑单路生成
     setGuestSession(true)
     setActiveTaskId(null)
+    activeTaskIdRef.current = null
+    workspaceVisibleRef.current = true
     setRaceCandidates(null)
     setPane('preview')
     setHtml('')
@@ -1058,11 +1255,17 @@ export default function App() {
           canResumeWorkspace={
             !signedIn &&
             guestSession &&
-            (Boolean(html.trim()) || chat.length > 0 || streaming)
+            (Boolean(html.trim()) ||
+              chat.length > 0 ||
+              streaming ||
+              Boolean(taskGenRef.current.get(guestGenKey)?.streaming))
           }
           onResumeWorkspace={() => {
             setGuestSession(true)
+            activeTaskIdRef.current = null
+            workspaceVisibleRef.current = true
             setView('workspace')
+            attachTaskGenUi(guestGenKey)
           }}
         />
       ) : null}
@@ -1139,9 +1342,13 @@ export default function App() {
           onPickWinner={onPickWinner}
           onBack={() => {
             setRaceCandidates(null)
-            // 步骤：访客返回首页时保留 html/chat/versions，便于再进入
-            if (signedIn && !guestSession) setView('projects')
-            else {
+            // 步骤：只拆 UI，后台生成按 Task 继续；再进原项目可接回思考过程
+            workspaceVisibleRef.current = false
+            detachStreamUi()
+            if (signedIn && !guestSession) {
+              activeTaskIdRef.current = null
+              setView('projects')
+            } else {
               setGuestSession(true)
               setView('home')
             }
