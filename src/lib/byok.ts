@@ -1,3 +1,7 @@
+import {
+  ENABLE_THINKING,
+  GENERATION_MAX_TOKENS,
+} from '../../shared/constants'
 import { HTML_GENERATOR_SYSTEM_PROMPT } from '../../shared/ui-ux-skill'
 import { extractHtmlClient } from './html'
 import type { ChatTurn } from './api'
@@ -217,6 +221,10 @@ function buildByokUserContent(options: {
     )
   }
   parts.push(`【本轮需求】\n${options.prompt.trim()}`)
+  // 步骤：与服务端一致，强调快交付最小可玩版本
+  parts.push(
+    '【交付优先级】尽快输出可运行最小实现；允许粗糙与小 bug，先保证基本功能能点/能玩。',
+  )
   return parts.join('\n\n')
 }
 
@@ -289,10 +297,13 @@ export async function streamByokHtml(options: {
       body: JSON.stringify({
         model: config.model,
         stream: true,
+        // 步骤：与服务端一致，关思考 + 限长，缩短演示等待
+        enable_thinking: ENABLE_THINKING,
+        max_tokens: GENERATION_MAX_TOKENS,
         messages: [
           {
             role: 'system',
-            // 步骤：与服务端内置生成共用 ui-ux-pro-max 约束
+            // 步骤：与服务端内置生成共用快优先约束
             content: HTML_GENERATOR_SYSTEM_PROMPT,
           },
           { role: 'user', content: userContent },

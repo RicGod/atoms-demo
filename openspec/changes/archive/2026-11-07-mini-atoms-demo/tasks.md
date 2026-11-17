@@ -7,8 +7,8 @@
 - [x] 1.1 初始化 **Vite + React + 独立 API**，验证 `dev` 可启动空白页
 - [x] 1.2 配置 `.gitignore`（含 `.env*`）与 `.env.example` / `.env.local` 占位（`BAILIAN_API_KEY`、`TURSO_DATABASE_URL`、`TURSO_AUTH_TOKEN`），验证示例文件无真实密钥
 - [x] 1.3 增加健康检查接口（如 `/api/health`），验证本地可返回 OK
-- [ ] 1.4 **尽早**部署到 Render 占位并配置环境变量槽位；验证公网 health（优先拿链接）
-  - 代码侧已就绪：`render.yaml` + 生产 `npm start`（API + `dist`）+ README；Vercel 配置仍保留为备选；需用户 Render 账号实际部署后回填公网 URL
+- [x] 1.4 **尽早**部署到 Render 占位并配置环境变量槽位；验证公网 health（优先拿链接）
+  - 已验收：https://atoms-demo-7qi4.onrender.com/ ；`/api/health` 正常；百炼与 Turso 环境变量已配置
 
 ## 2. HTML 生成（html-generation）
 
@@ -39,19 +39,22 @@
 ## 5. 赛马延展（horse-race · 可整段砍）
 
 - [ ] 5.1 仅在核心闭环稳定后实现：并行两路生成；验证返回两份候选
+  - 本 change **不验收**：代码有并行逻辑，但演示入口默认隐藏；不算产品完成
 - [ ] 5.2 UI：A/B 展示、用户择优（无自动打分）；写入当前 Task（覆盖）；验证单路失败时另一路仍可用
+  - 本 change **不验收**：择优 UI 未作为交卷能力开放；留待后续 change
 - [x] 5.3 若时间不够：文档标明未做赛马并跳过本段
-  - README「明确未做项 / 剩余能力」已标明 Horse Race 未实现
+  - 已按「可整段砍」收口：文档写明赛马未作为交卷亮点验收；入口隐藏
 
 ## 6. 文档与验收
 
 - [x] 6.1 README 写清与通过案例差异（服务端内置 Key vs 浏览器 BYOK）及未做项（无分享直链 / 无 OIDC / 无版本树 / Score 不进模型等）
-- [ ] 6.2 对照避坑：public 仓库/链接、无 Key 入库、真实交互+（登录后）持久化；记录公网 URL
-  - README 已对照避坑；公网 URL 待 Render 部署后填写
-- [ ] 6.3 端到端：真 LLM 交卷路径（内置 Key）走通 Prompt→Preview→Task 保存→回看
-  - 代码路径已就绪；需配置 `BAILIAN_API_KEY`（建议同时配 Turso）后手工验收
+- [x] 6.2 对照避坑：public 仓库/链接、无 Key 入库、真实交互+（登录后）持久化；记录公网 URL
+  - 已验收：README 已记录公网 URL；避坑项对照通过
+- [x] 6.3 端到端：真 LLM 交卷路径（内置 Key）走通 Prompt→Preview→Task 保存→回看
+  - 已验收（用户确认）：除赛马外交卷路径全部通过
 
 ## Workflow follow-up
 
-- 规划已按共识回写；用户下一步说 **`openspec apply`**（或 `/opsx-apply`）才写业务代码
-- 实现与验收完成后再 archive 本 change
+- 除赛马（5.1 / 5.2）外，本 change 已全部实现并验收
+- 赛马按 5.3 整段跳过验收；若要产品化，开新 change（例如恢复演示入口）
+- 下一步可执行 **`openspec archive`**（或 `/opsx-archive`）收口本 change

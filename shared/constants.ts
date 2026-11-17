@@ -20,6 +20,15 @@ export const FIRST_BYTE_TIMEOUT_MS = 30_000
 export const IDLE_TIMEOUT_MS = 60_000
 export const HARD_CAP_TIMEOUT_MS = 10 * 60_000
 
+/**
+ * 关闭模型思考链（enable_thinking=false）
+ * 检查演示优先缩短等待；允许产物粗糙，只要基本可交互
+ */
+export const ENABLE_THINKING = false
+
+/** 生成上限：限制冗长美化，尽快交付可运行最小 HTML */
+export const GENERATION_MAX_TOKENS = 8192
+
 export type GenerationMode = 'builtin' | 'byok' | 'mock'
 
 export type TaskSource = 'single' | 'horse-race'

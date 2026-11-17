@@ -45,12 +45,12 @@ describe('buildUserContent', () => {
   })
 })
 
-describe('SYSTEM_PROMPT · ui-ux-pro-max', () => {
-  it('内嵌浅色科技感规范且禁止 emoji 图标', () => {
-    expect(SYSTEM_PROMPT).toContain('ui-ux-pro-max')
+describe('SYSTEM_PROMPT · 快优先可玩', () => {
+  it('强调速度与最小可玩，并保留浅色/禁 emoji 底线', () => {
+    expect(SYSTEM_PROMPT).toMatch(/尽快|最小可玩|快优先/)
     expect(SYSTEM_PROMPT).toMatch(/浅色/)
-    expect(SYSTEM_PROMPT).toMatch(/禁止.*emoji|emoji 当图标/)
-    expect(SYSTEM_PROMPT).toMatch(/Space Grotesk|JetBrains Mono|青蓝/)
+    expect(SYSTEM_PROMPT).toMatch(/禁止 emoji|emoji 当图标/)
+    expect(SYSTEM_PROMPT).not.toMatch(/Space Grotesk|JetBrains Mono/)
   })
 })
 

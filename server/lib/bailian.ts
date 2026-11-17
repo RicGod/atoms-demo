@@ -1,6 +1,8 @@
 import {
   BAILIAN_BASE_URL,
+  ENABLE_THINKING,
   FIRST_BYTE_TIMEOUT_MS,
+  GENERATION_MAX_TOKENS,
   HARD_CAP_TIMEOUT_MS,
   IDLE_TIMEOUT_MS,
   type BuiltinModel,
@@ -68,6 +70,10 @@ export function buildUserContent(options: {
   }
 
   parts.push(`【本轮需求】\n${options.prompt.trim()}`)
+  // 步骤：每轮再强调一次速度，压低模型「先规划再写」的倾向
+  parts.push(
+    '【交付优先级】尽快输出可运行最小实现；允许粗糙与小 bug，先保证基本功能能点/能玩。',
+  )
   return parts.join('\n\n')
 }
 
@@ -115,6 +121,8 @@ export async function summarizeVersionChange(options: {
       body: JSON.stringify({
         model,
         stream: false,
+        // 步骤：摘要为非流式调用，显式关思考，避免 400 / 额外耗时
+        enable_thinking: ENABLE_THINKING,
         temperature: 0.3,
         max_tokens: 80,
         messages: [
@@ -234,6 +242,9 @@ export async function streamBuiltinHtml(options: {
       body: JSON.stringify({
         model,
         stream: true,
+        // 步骤：关闭思考链，尽快吐 HTML；上限防止冗长美化拖垮演示耐心
+        enable_thinking: ENABLE_THINKING,
+        max_tokens: GENERATION_MAX_TOKENS,
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
           { role: 'user', content: userContent },
