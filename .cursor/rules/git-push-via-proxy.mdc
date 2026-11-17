@@ -1,0 +1,25 @@
+---
+description: GitHub push/pull/fetch 必须经本机代理；裸推易 Connection reset
+alwaysApply: true
+---
+
+# 项目经验：GitHub 必须走本机代理
+
+本机直连 `github.com:443` 常失败（`Recv failure: Connection was reset` / timeout）。
+
+## 铁律
+
+- 用户说「提交并 push / push / 推送」时：**先本地 commit，再经代理 push**；禁止先裸 `git push` 再失败重试。
+- **不要**写入 `git config --global` / 永久改仓库 proxy；只用当前 shell 环境变量或一次性 `-c`。
+- 默认代理：`http://127.0.0.1:10808`（若端口未监听，再探测系统代理或 7890/7897/10809）。
+
+## PowerShell 模板
+
+```powershell
+$env:HTTP_PROXY='http://127.0.0.1:10808'
+$env:HTTPS_PROXY='http://127.0.0.1:10808'
+$env:ALL_PROXY='http://127.0.0.1:10808'
+git -c http.proxy=http://127.0.0.1:10808 -c https.proxy=http://127.0.0.1:10808 push origin HEAD
+```
+
+pull / fetch 同样带代理。
