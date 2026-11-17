@@ -77,6 +77,8 @@ export const BYOK_STORAGE_KEY = 'mini-atoms-byok'
 export const EMAIL_STORAGE_KEY = 'mini-atoms-email'
 /** 工作区左侧对话列宽度（px） */
 export const CHAT_WIDTH_STORAGE_KEY = 'mini-atoms-chat-width'
+/** 生成质量：简约 / 精美 */
+export const QUALITY_STYLE_STORAGE_KEY = 'mini-atoms-quality-style'
 
 /** 访客预置示例。看板 / 主页 / 房贷都是单文件 HTML，不是项目。 */
 export const PRESETS = [

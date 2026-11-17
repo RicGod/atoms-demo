@@ -1,8 +1,10 @@
 import {
-  ENABLE_THINKING,
-  GENERATION_MAX_TOKENS,
+  DEFAULT_QUALITY_STYLE,
+  enableThinkingFor,
+  maxTokensFor,
+  type QualityStyle,
 } from '../../shared/constants'
-import { HTML_GENERATOR_SYSTEM_PROMPT } from '../../shared/ui-ux-skill'
+import { getHtmlGeneratorSystemPrompt } from '../../shared/ui-ux-skill'
 import { extractHtmlClient } from './html'
 import type { ChatTurn } from './api'
 import type { ByokConfig, ByokProfile, ByokStore } from './types'
@@ -200,7 +202,9 @@ function buildByokUserContent(options: {
   prompt: string
   messages?: ChatTurn[]
   currentHtml?: string
+  qualityStyle?: QualityStyle
 }): string {
+  const style = options.qualityStyle ?? DEFAULT_QUALITY_STYLE
   const parts: string[] = []
   const history = (options.messages ?? []).slice(-8)
   if (history.length) {
@@ -221,10 +225,12 @@ function buildByokUserContent(options: {
     )
   }
   parts.push(`【本轮需求】\n${options.prompt.trim()}`)
-  // 步骤：与服务端一致，强调快交付最小可玩版本
-  parts.push(
-    '【交付优先级】尽快输出可运行最小实现；允许粗糙与小 bug，先保证基本功能能点/能玩。',
-  )
+  // 步骤：仅简约强调快且主路径正确
+  if (style === 'simple') {
+    parts.push(
+      '【交付优先级】尽快输出；视觉可糙。但主路径必须正确可玩/可用：控件有效、无运行时错误、游戏或工具有完整反馈；宁可玩法更简单，也不要半成品或明显 bug。',
+    )
+  }
   return parts.join('\n\n')
 }
 
@@ -267,6 +273,8 @@ export async function streamByokHtml(options: {
   config: ByokConfig
   messages?: ChatTurn[]
   currentHtml?: string
+  /** 简约（默认）/ 精美 */
+  qualityStyle?: QualityStyle
   onChunk?: (text: string) => void
   onThinking?: (text: string) => void
   /** 累计正文变化后的展示快照（已尽力抽 HTML） */
@@ -283,8 +291,15 @@ export async function streamByokHtml(options: {
     onHtml,
     signal,
   } = options
+  const qualityStyle = options.qualityStyle ?? DEFAULT_QUALITY_STYLE
   const base = config.baseUrl.replace(/\/$/, '')
-  const userContent = buildByokUserContent({ prompt, messages, currentHtml })
+  const userContent = buildByokUserContent({
+    prompt,
+    messages,
+    currentHtml,
+    qualityStyle,
+  })
+  const systemPrompt = getHtmlGeneratorSystemPrompt(qualityStyle)
 
   let res: Response
   try {
@@ -297,14 +312,13 @@ export async function streamByokHtml(options: {
       body: JSON.stringify({
         model: config.model,
         stream: true,
-        // 步骤：与服务端一致，关思考 + 限长，缩短演示等待
-        enable_thinking: ENABLE_THINKING,
-        max_tokens: GENERATION_MAX_TOKENS,
+        // 步骤：与服务端一致，按质量模式切换思考与长度
+        enable_thinking: enableThinkingFor(qualityStyle),
+        max_tokens: maxTokensFor(qualityStyle),
         messages: [
           {
             role: 'system',
-            // 步骤：与服务端内置生成共用快优先约束
-            content: HTML_GENERATOR_SYSTEM_PROMPT,
+            content: systemPrompt,
           },
           { role: 'user', content: userContent },
         ],

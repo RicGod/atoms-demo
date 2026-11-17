@@ -1,13 +1,18 @@
 import {
   BAILIAN_BASE_URL,
-  ENABLE_THINKING,
+  DEFAULT_QUALITY_STYLE,
   FIRST_BYTE_TIMEOUT_MS,
-  GENERATION_MAX_TOKENS,
   HARD_CAP_TIMEOUT_MS,
   IDLE_TIMEOUT_MS,
+  enableThinkingFor,
+  maxTokensFor,
   type BuiltinModel,
+  type QualityStyle,
 } from '../../shared/constants.js'
-import { HTML_GENERATOR_SYSTEM_PROMPT } from '../../shared/ui-ux-skill.js'
+import {
+  getHtmlGeneratorSystemPrompt,
+  HTML_GENERATOR_SYSTEM_PROMPT,
+} from '../../shared/ui-ux-skill.js'
 import { sanitizeChangeSummary } from '../../shared/versions.js'
 import { isQuotaOrAuthFailure } from './quota.js'
 
@@ -41,7 +46,10 @@ export function buildUserContent(options: {
   prompt: string
   messages?: ChatTurn[]
   currentHtml?: string
+  /** 质量模式：仅简约追加「快交付」约束 */
+  qualityStyle?: QualityStyle
 }): string {
+  const style = options.qualityStyle ?? DEFAULT_QUALITY_STYLE
   const parts: string[] = []
   const history = (options.messages ?? [])
     .filter((m) => m.content?.trim())
@@ -70,10 +78,12 @@ export function buildUserContent(options: {
   }
 
   parts.push(`【本轮需求】\n${options.prompt.trim()}`)
-  // 步骤：每轮再强调一次速度，压低模型「先规划再写」的倾向
-  parts.push(
-    '【交付优先级】尽快输出可运行最小实现；允许粗糙与小 bug，先保证基本功能能点/能玩。',
-  )
+  // 步骤：仅简约强调「快但主路径正确」；精美交给长 system prompt 与思考链
+  if (style === 'simple') {
+    parts.push(
+      '【交付优先级】尽快输出；视觉可糙。但主路径必须正确可玩/可用：控件有效、无运行时错误、游戏或工具有完整反馈；宁可玩法更简单，也不要半成品或明显 bug。',
+    )
+  }
   return parts.join('\n\n')
 }
 
@@ -121,8 +131,8 @@ export async function summarizeVersionChange(options: {
       body: JSON.stringify({
         model,
         stream: false,
-        // 步骤：摘要为非流式调用，显式关思考，避免 400 / 额外耗时
-        enable_thinking: ENABLE_THINKING,
+        // 步骤：摘要非流式，始终关思考（与质量模式无关）
+        enable_thinking: false,
         temperature: 0.3,
         max_tokens: 80,
         messages: [
@@ -187,6 +197,8 @@ export async function streamBuiltinHtml(options: {
   messages?: ChatTurn[]
   /** 可选：当前 Artifact HTML，用于整页覆盖迭代 */
   currentHtml?: string
+  /** 简约（默认）或精美 */
+  qualityStyle?: QualityStyle
   /** 兼容：HTML 正文 delta（不含思考链） */
   onChunk?: (text: string) => void
   /** 模型思考/推理过程（若有） */
@@ -203,6 +215,7 @@ export async function streamBuiltinHtml(options: {
     onThinking,
     signal,
   } = options
+  const qualityStyle = options.qualityStyle ?? DEFAULT_QUALITY_STYLE
   // 调用方应已用 getBailianApiKey()；此处再防一手空 Key
   if (!apiKey.trim()) {
     return {
@@ -230,7 +243,15 @@ export async function streamBuiltinHtml(options: {
   }
 
   // 步骤：把历史与当前 HTML 拼进单条 user message，保持 chat/completions 兼容
-  const userContent = buildUserContent({ prompt, messages, currentHtml })
+  const userContent = buildUserContent({
+    prompt,
+    messages,
+    currentHtml,
+    qualityStyle,
+  })
+  const systemPrompt = getHtmlGeneratorSystemPrompt(qualityStyle)
+  const enableThinking = enableThinkingFor(qualityStyle)
+  const maxTokens = maxTokensFor(qualityStyle)
 
   try {
     const res = await fetch(`${BAILIAN_BASE_URL}/chat/completions`, {
@@ -242,11 +263,11 @@ export async function streamBuiltinHtml(options: {
       body: JSON.stringify({
         model,
         stream: true,
-        // 步骤：关闭思考链，尽快吐 HTML；上限防止冗长美化拖垮演示耐心
-        enable_thinking: ENABLE_THINKING,
-        max_tokens: GENERATION_MAX_TOKENS,
+        // 步骤：简约关思考+限长；精美开思考+更大上限（改前模式）
+        enable_thinking: enableThinking,
+        max_tokens: maxTokens,
         messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'system', content: systemPrompt },
           { role: 'user', content: userContent },
         ],
       }),

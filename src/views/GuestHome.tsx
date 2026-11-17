@@ -1,5 +1,8 @@
 import { AtomsMark } from '../components/AtomsMark'
-import { BUILTIN_MODELS } from '../../shared/constants'
+import {
+  BUILTIN_MODELS,
+  type QualityStyle,
+} from '../../shared/constants'
 import { PRESETS } from '../lib/types'
 
 /** 访客首页：极简落地 + 模型选择 + 输入区内发送（无独立「生成」按钮） */
@@ -8,6 +11,9 @@ export function GuestHome(props: {
   onPromptChange: (v: string) => void
   model: string
   onModelChange: (v: string) => void
+  /** 简约（默认）/ 精美 */
+  qualityStyle: QualityStyle
+  onQualityStyleChange: (v: QualityStyle) => void
   streaming: boolean
   statusText: string
   statusError: boolean
@@ -46,6 +52,28 @@ export function GuestHome(props: {
         <p className="hero-sub">一句话描述需求，即时生成可预览的单文件 HTML。</p>
 
         <div className="guest-compose">
+          {/* 步骤：单标签开关；默认不选=简约快路径，选中=深度思考精美模式 */}
+          <div className="guest-model-row quality-style-row">
+            <button
+              type="button"
+              className={
+                props.qualityStyle === 'polished'
+                  ? 'chip chip-model active'
+                  : 'chip chip-model'
+              }
+              disabled={props.streaming}
+              aria-pressed={props.qualityStyle === 'polished'}
+              onClick={() =>
+                props.onQualityStyleChange(
+                  props.qualityStyle === 'polished' ? 'simple' : 'polished',
+                )
+              }
+              title="开启后走深度思考与精致视觉规范，耗时更长；默认关闭"
+            >
+              深度思考（耗时长）
+            </button>
+          </div>
+
           {/* 步骤：模型 chips，科技浅色；与输入同框，不抢主标题 */}
           <div className="guest-model-row" role="group" aria-label="选择模型">
             {BUILTIN_MODELS.map((m) => (

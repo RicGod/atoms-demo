@@ -441,6 +441,24 @@ select:focus-visible,
   background: var(--accent-soft);
 }
 
+/* 步骤：质量模式行与模型行稍加区分 */
+.quality-style-row {
+  margin-bottom: 0.55rem;
+}
+
+.quality-style-inline {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.chip-quiet.active {
+  color: var(--accent-hover);
+  border-color: rgba(14, 116, 144, 0.35);
+  background: var(--accent-soft);
+}
+
 /* 步骤：底栏提示 + 圆形上送，不抢主标题 */
 .guest-compose-footer {
   display: flex;

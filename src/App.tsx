@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { BUILTIN_MODELS } from '../shared/constants'
+import {
+  BUILTIN_MODELS,
+  DEFAULT_QUALITY_STYLE,
+  parseQualityStyle,
+  type QualityStyle,
+} from '../shared/constants'
 import { ByokModal } from './components/ByokModal'
 import {
   createTask,
@@ -29,6 +34,7 @@ import { collapseUnchanged, diffLines } from './lib/line-diff'
 import {
   EMAIL_STORAGE_KEY,
   PRESETS,
+  QUALITY_STYLE_STORAGE_KEY,
   type ByokStore,
   type GenerationMode,
   type TaskSummary,
@@ -69,7 +75,25 @@ export default function App() {
   const [prompt, setPrompt] = useState('做一个可点击的霓虹风格打卡按钮')
   // 步骤：默认用 flash，降低访客首包超时导致误走失败路径的概率
   const [model, setModel] = useState<string>('qwen3.8-flash')
+  // 步骤：默认简约；精美恢复改前长思考+视觉规范
+  const [qualityStyle, setQualityStyle] = useState<QualityStyle>(() => {
+    try {
+      return parseQualityStyle(localStorage.getItem(QUALITY_STYLE_STORAGE_KEY))
+    } catch {
+      return DEFAULT_QUALITY_STYLE
+    }
+  })
   const [preferByok, setPreferByok] = useState(false)
+
+  /** 步骤：切换质量并记住本机偏好 */
+  const onQualityStyleChange = (v: QualityStyle) => {
+    setQualityStyle(v)
+    try {
+      localStorage.setItem(QUALITY_STYLE_STORAGE_KEY, v)
+    } catch {
+      /* ignore */
+    }
+  }
   // 步骤：本机多模型仓库；生成时取 active 配置
   const [byokStore, setByokStore] = useState<ByokStore>({
     profiles: [],
@@ -659,6 +683,7 @@ export default function App() {
           model: activeProfile.model,
           messages: history,
           currentHtml,
+          qualityStyle,
           signal,
           onThinking: (t) =>
             onThinkingBound(
@@ -699,6 +724,7 @@ export default function App() {
           config: byok,
           currentHtml,
           messages: history,
+          qualityStyle,
           signal,
           onThinking: (t) =>
             onThinkingBound(
@@ -738,6 +764,7 @@ export default function App() {
         model,
         messages: history,
         currentHtml,
+        qualityStyle,
         signal,
         onThinking: (t) =>
           onThinkingBound(
@@ -1039,6 +1066,7 @@ export default function App() {
       const result = await generateBuiltin({
         prompt: p,
         model,
+        qualityStyle,
         onThinking: (t) => {
           setStreamThinking((prev) => prev + t)
           setStreamStage('模型正在思考')
@@ -1242,6 +1270,8 @@ export default function App() {
           onPromptChange={setPrompt}
           model={model}
           onModelChange={setModel}
+          qualityStyle={qualityStyle}
+          onQualityStyleChange={onQualityStyleChange}
           streaming={streaming}
           statusText={status.text}
           statusError={status.kind === 'error'}
@@ -1322,6 +1352,8 @@ export default function App() {
           onExportHtml={onExportHtml}
           model={model}
           onModelChange={setModel}
+          qualityStyle={qualityStyle}
+          onQualityStyleChange={onQualityStyleChange}
           preferByok={preferByok}
           onPreferByok={setPreferByok}
           hasByok={hasModel}

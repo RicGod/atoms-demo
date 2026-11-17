@@ -45,12 +45,29 @@ describe('buildUserContent', () => {
   })
 })
 
-describe('SYSTEM_PROMPT · 快优先可玩', () => {
-  it('强调速度与最小可玩，并保留浅色/禁 emoji 底线', () => {
-    expect(SYSTEM_PROMPT).toMatch(/尽快|最小可玩|快优先/)
+describe('SYSTEM_PROMPT · 快优先可玩（简约默认）', () => {
+  it('强调速度与主路径正确，并保留浅色/禁 emoji 底线', () => {
+    expect(SYSTEM_PROMPT).toMatch(/尽快|核心闭环正确|快优先/)
+    expect(SYSTEM_PROMPT).toMatch(/逻辑不能坏|正确性优先/)
+    expect(SYSTEM_PROMPT).not.toMatch(/允许有 bug/)
     expect(SYSTEM_PROMPT).toMatch(/浅色/)
     expect(SYSTEM_PROMPT).toMatch(/禁止 emoji|emoji 当图标/)
     expect(SYSTEM_PROMPT).not.toMatch(/Space Grotesk|JetBrains Mono/)
+  })
+})
+
+describe('qualityStyle prompts', () => {
+  it('精美模式恢复 ui-ux-pro-max；简约强调正确性而非放任 bug', async () => {
+    const { getHtmlGeneratorSystemPrompt } = await import(
+      '../shared/ui-ux-skill.js'
+    )
+    const polished = getHtmlGeneratorSystemPrompt('polished')
+    expect(polished).toContain('ui-ux-pro-max')
+    expect(polished).toMatch(/Space Grotesk|JetBrains Mono/)
+    const simple = getHtmlGeneratorSystemPrompt('simple')
+    expect(simple).toMatch(/核心闭环正确|正确性优先/)
+    expect(simple).not.toMatch(/允许有 bug/)
+    expect(simple).not.toMatch(/Space Grotesk/)
   })
 })
 

@@ -1,6 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type { QualityStyle } from '../../shared/constants'
 import type { ChatTurn, RaceCandidate } from '../lib/api'
 import type { DiffLine } from '../lib/line-diff'
+import { preparePreviewHtml } from '../lib/preview-html'
 import {
   CHAT_WIDTH_STORAGE_KEY,
   type ByokProfile,
@@ -62,6 +64,9 @@ export function Workspace(props: {
   /** 访客可选模型；登录用户忽略（仅自配） */
   model: string
   onModelChange: (m: string) => void
+  /** 简约（默认）/ 精美 */
+  qualityStyle: QualityStyle
+  onQualityStyleChange: (v: QualityStyle) => void
   preferByok: boolean
   onPreferByok: (v: boolean) => void
   hasByok: boolean
@@ -348,7 +353,7 @@ export function Workspace(props: {
                         <iframe
                           title={`race-${c.lane}`}
                           sandbox="allow-scripts allow-forms"
-                          srcDoc={c.html}
+                          srcDoc={preparePreviewHtml(c.html)}
                         />
                         <button
                           className="btn sm"
@@ -429,6 +434,25 @@ export function Workspace(props: {
             />
             <div className="composer-toolbar">
               <div className="composer-toolbar-left">
+                {/* 步骤：单标签开关；默认不选=简约，选中=深度思考 */}
+                <button
+                  type="button"
+                  className={
+                    props.qualityStyle === 'polished'
+                      ? 'chip chip-quiet active'
+                      : 'chip chip-quiet'
+                  }
+                  disabled={props.streaming || props.racing}
+                  aria-pressed={props.qualityStyle === 'polished'}
+                  onClick={() =>
+                    props.onQualityStyleChange(
+                      props.qualityStyle === 'polished' ? 'simple' : 'polished',
+                    )
+                  }
+                  title="开启后走深度思考与精致视觉规范，耗时更长；默认关闭"
+                >
+                  深度思考（耗时长）
+                </button>
                 {props.guest ? (
                   // 步骤：文案与首页 guest-mode-hint 对齐
                   <button
@@ -589,11 +613,11 @@ export function Workspace(props: {
         >
           {props.pane === 'preview' ? (
             <div className="iframe-wrap stage-body">
-              {/* sandbox 保持收紧：仅脚本与表单，无 top-navigation */}
+              {/* sandbox 保持收紧：仅脚本与表单，无 same-origin；预览注入 Storage shim */}
               <iframe
                 title="preview"
                 sandbox="allow-scripts allow-forms"
-                srcDoc={props.html || emptyPreview}
+                srcDoc={preparePreviewHtml(props.html || emptyPreview)}
               />
             </div>
           ) : (

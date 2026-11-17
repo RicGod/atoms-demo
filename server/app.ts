@@ -2,8 +2,10 @@ import cors from 'cors'
 import express, { type Request, type Response } from 'express'
 import {
   BUILTIN_MODELS,
+  parseQualityStyle,
   type BuiltinModel,
   type GenerationMode,
+  type QualityStyle,
   type TaskSource,
 } from '../shared/constants.js'
 import {
@@ -31,6 +33,7 @@ export type StreamHtmlFn = (options: {
   apiKey: string
   messages?: ChatTurn[]
   currentHtml?: string
+  qualityStyle?: QualityStyle
   onChunk?: (text: string) => void
   onThinking?: (text: string) => void
   signal?: AbortSignal
@@ -150,6 +153,8 @@ export function createApp(options: CreateAppOptions = {}) {
       typeof req.body?.currentHtml === 'string'
         ? req.body.currentHtml
         : undefined
+    // 步骤：简约（默认）/ 精美；非法值回落简约
+    const qualityStyle = parseQualityStyle(req.body?.qualityStyle)
 
     // 优先 aliQwen-api，回退 BAILIAN_API_KEY
     const apiKey = getBailianApiKey()
@@ -164,7 +169,7 @@ export function createApp(options: CreateAppOptions = {}) {
       res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
     }
 
-    send('meta', { mode, model })
+    send('meta', { mode, model, qualityStyle })
 
     if (!apiKey) {
       send('error', {
@@ -197,6 +202,7 @@ export function createApp(options: CreateAppOptions = {}) {
       apiKey,
       messages,
       currentHtml,
+      qualityStyle,
       onThinking: (text) => send('thinking', { text }),
       onChunk: (text) => {
         // 兼容：旧前端只认 chunk

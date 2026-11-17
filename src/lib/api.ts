@@ -1,3 +1,4 @@
+import type { QualityStyle } from '../../shared/constants'
 import type {
   GenerationMode,
   PersistedChatItem,
@@ -32,6 +33,8 @@ export async function generateBuiltin(options: {
   messages?: ChatTurn[]
   /** 当前 HTML，整页覆盖生成 */
   currentHtml?: string
+  /** 简约（默认）/ 精美 */
+  qualityStyle?: QualityStyle
   /** 兼容：正文 chunk / delta */
   onChunk?: (text: string) => void
   /** 思考过程增量 */
@@ -56,6 +59,7 @@ export async function generateBuiltin(options: {
       model: options.model,
       messages: options.messages,
       currentHtml: options.currentHtml,
+      qualityStyle: options.qualityStyle,
     }),
     signal: options.signal,
   })
